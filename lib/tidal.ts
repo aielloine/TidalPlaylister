@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { prisma } from "./db";
+import { deezerGenres } from "./deezer";
 
 // Surchargeables pour les tests (faux serveur Tidal).
 const API = process.env.TIDAL_API_URL ?? "https://openapi.tidal.com/v2";
@@ -191,7 +192,7 @@ const rel = (r: Resource, name: string) => r.relationships?.[name]?.data?.map((d
 const genreNames = (ids: string[], byId: Map<string, Resource>) =>
   ids.map((id) => byId.get(id)?.attributes?.genreName?.trim().toLowerCase()).filter(Boolean) as string[];
 
-// Genre de la piste ; à défaut, genre(s) de l'album.
+// Genre de la piste ; à défaut, genre(s) de l'album Tidal ; à défaut, genres Deezer via l'ISRC.
 export async function resolveTracks(trackIds: string[]): Promise<TrackInfo[]> {
   const cc = await country();
   const out: TrackInfo[] = [];
@@ -217,11 +218,13 @@ export async function resolveTracks(trackIds: string[]): Promise<TrackInfo[]> {
 
     for (const t of tracks) {
       const own = genreNames(rel(t, "genres"), genres);
+      const tidalGenres = own.length ? own : (albumGenres.get(rel(t, "albums")[0]) ?? []);
+      const isrc = t.attributes?.isrc as string | undefined;
       const artist = rel(t, "artists").map((id) => artists.get(id)?.attributes?.name).filter(Boolean).join(", ");
       out.push({
         id: t.id,
         label: `${artist || "?"} — ${t.attributes?.title ?? t.id}`,
-        genres: own.length ? own : (albumGenres.get(rel(t, "albums")[0]) ?? []),
+        genres: tidalGenres.length || !isrc ? tidalGenres : await deezerGenres(isrc),
       });
     }
   }

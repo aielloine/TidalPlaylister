@@ -2,6 +2,7 @@ import { Alert, Button, Card, CardContent, Chip, TextField, Typography } from "@
 import { addMapping, createPlaylist, deleteMapping } from "@/app/actions";
 import { prisma } from "@/lib/db";
 import GenrePicker from "@/components/GenrePicker";
+import { deezerGenreList } from "@/lib/deezer";
 import { getPlaylists, getTidalGenres, type Playlist } from "@/lib/tidal";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +17,7 @@ export default async function Playlists() {
 
   let playlists: Playlist[] = [];
   let error = "";
-  const [pl, tidalGenres] = await Promise.allSettled([getPlaylists(), getTidalGenres()]);
+  const [pl, tidalGenres, deezer] = await Promise.allSettled([getPlaylists(), getTidalGenres(), deezerGenreList()]);
   if (pl.status === "fulfilled") playlists = pl.value;
   else error = (pl.reason as Error).message;
   // Rafraîchit le nom en cache des mappings si la playlist a été renommée sur Tidal.
@@ -31,19 +32,20 @@ export default async function Playlists() {
   const known = new Set(playlists.map((p) => p.id));
   const orphans = error ? [] : mappings.filter((m) => !known.has(m.playlistId));
   const unmapped = genres.filter((g) => !mapped.has(g.name));
-  // Autocomplétion : genres Tidal officiels + genres rencontrés sur vos titres, hors genres déjà mappés.
-  const options = [...new Set([...(tidalGenres.status === "fulfilled" ? tidalGenres.value : []), ...genres.map((g) => g.name)])]
+  // Autocomplétion : genres Tidal + Deezer + rencontrés sur vos titres, hors genres déjà mappés.
+  const ok = (r: PromiseSettledResult<string[]>) => (r.status === "fulfilled" ? r.value : []);
+  const options = [...new Set([...ok(tidalGenres), ...ok(deezer), ...genres.map((g) => g.name)])]
     .filter((g) => !mapped.has(g))
     .sort();
 
   return (
     <main className="mx-auto flex max-w-6xl flex-col gap-4 p-4">
       {error && <Alert severity="error">Lecture des playlists impossible : {error}</Alert>}
-      {tidalGenres.status === "rejected" && (
-        <Alert severity="warning">Liste des genres Tidal indisponible : {(tidalGenres.reason as Error).message}</Alert>
-      )}
-      {tidalGenres.status === "fulfilled" && !tidalGenres.value.length && (
-        <Alert severity="warning">Tidal a renvoyé une liste de genres vide.</Alert>
+      {!ok(tidalGenres).length && !ok(deezer).length && (
+        <Alert severity="warning">
+          Listes de genres Tidal et Deezer indisponibles
+          {deezer.status === "rejected" && ` (Deezer : ${(deezer.reason as Error).message})`}.
+        </Alert>
       )}
       {!genres.length && (
         <Alert severity="info">

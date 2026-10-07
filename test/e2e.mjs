@@ -16,9 +16,10 @@ const tracks = {
   t2: { title: "Song Two", genres: [], album: "a2" }, // genre album -> jazz
   t3: { title: "Song Three", genres: [], album: "a3" }, // aucun genre
   t4: { title: "Song Four", genres: ["g3"], album: "a1" }, // electro, non mappé
+  t5: { title: "Song Five", genres: [], album: "a3", isrc: "ISRC5" }, // rien chez Tidal -> Deezer : reggae
 };
 const albums = { a1: [], a2: ["g2"], a3: [] };
-const state = { favorites: ["t1", "t2", "t3", "t4"], added: {}, created: [] };
+const state = { favorites: ["t1", "t2", "t3", "t4", "t5"], added: {}, created: [], deezerIsrcs: [] };
 
 const fake = createServer(async (req, res) => {
   const url = new URL(req.url, FAKE);
@@ -28,6 +29,15 @@ const fake = createServer(async (req, res) => {
   const p = url.pathname;
   const ids = url.searchParams.getAll("filter[id]");
   const genreRes = (gs) => gs.map((id) => ({ id, type: "genres", attributes: { genreName: genres[id] } }));
+
+  // Faux Deezer
+  if (p.startsWith("/deezer/track/isrc:")) {
+    const isrc = decodeURIComponent(p.split(":")[1]);
+    state.deezerIsrcs.push(isrc);
+    return json(isrc === "ISRC5" ? { id: 5, album: { id: 55 } } : { error: { type: "DataException", code: 800 } });
+  }
+  if (p === "/deezer/album/55") return json({ id: 55, genres: { data: [{ id: 2, name: "Reggae" }] } });
+  if (p === "/deezer/genre") return json({ data: [{ id: 0, name: "All" }, { id: 1, name: "Pop" }, { id: 2, name: "Reggae" }] });
 
   if (p === "/token") return json({ access_token: "AT", refresh_token: "RT", expires_in: 3600 });
   if (p === "/v2/users/me") return json({ data: { id: "u1", type: "users", attributes: { country: "FR" } } });
@@ -61,7 +71,7 @@ const fake = createServer(async (req, res) => {
       data: ids.map((id) => ({
         id,
         type: "tracks",
-        attributes: { title: tracks[id].title },
+        attributes: { title: tracks[id].title, isrc: tracks[id].isrc ?? `ISRC-${id}` },
         relationships: {
           genres: { data: tracks[id].genres.map((g) => ({ id: g, type: "genres" })) },
           albums: { data: [{ id: tracks[id].album, type: "albums" }] },
@@ -96,6 +106,7 @@ const env = {
   TIDAL_CLIENT_ID: "cid",
   TIDAL_API_URL: `${FAKE}/v2`,
   TIDAL_TOKEN_URL: `${FAKE}/token`,
+  DEEZER_API_URL: `${FAKE}/deezer`,
   PORT: "3999",
   HOSTNAME: "127.0.0.1",
 };
@@ -195,7 +206,7 @@ try {
   assert.ok(pl2.includes("rock") && pl2.includes("blues"));
   // Autocomplétion : genres Tidal non encore mappés (rock/jazz le sont déjà)
   const options = JSON.parse(pl2.match(/\\"options\\":(\[[^\]]*\])/)[1].replaceAll('\\"', '"'));
-  assert.deepEqual(options, ["hip-hop"]);
+  assert.deepEqual(options, ["hip-hop", "pop", "reggae"]);
 
   // Dry run : rien ne change sur Tidal
   await submit("/", "Dry run (simulation)");
@@ -205,19 +216,22 @@ try {
   assert.match(dash, /\[DRY RUN\] Artist — Song Two → « Jazz » \(jazz\)/);
   assert.match(dash, /Song Three — aucun genre : reste en favori/);
   assert.match(dash, /Song Four — genre non mappé \(electro\) : reste en favori/);
+  assert.match(dash, /Song Five — genre non mappé \(reggae\) : reste en favori/);
+  assert.deepEqual(state.deezerIsrcs.sort(), ["ISRC-t3", "ISRC5"]); // Deezer seulement sans genre Tidal
   assert.deepEqual(state.added, {});
-  assert.equal(state.favorites.length, 4);
+  assert.equal(state.favorites.length, 5);
 
   // Réel
   await submit("/", "Synchronisation réelle");
   await waitIdle();
   assert.deepEqual(state.added, { p1: ["t1"], p2: ["t2"] });
-  assert.deepEqual(state.favorites, ["t3", "t4"]);
+  assert.deepEqual(state.favorites, ["t3", "t4", "t5"]);
   dash = await page("/");
   assert.match(dash, /Titres triés \(total\)[\s\S]*?>2</);
 
   // Genres détectés proposés au mapping
-  assert.match(await page("/playlists"), /Genres détectés non mappés[\s\S]*electro/);
+  assert.match(await page("/playlists"), /Genres détectés non mappés[\s\S]*electro[\s\S]*reggae/);
+  assert.equal(state.deezerIsrcs.filter((i) => i === "ISRC5").length, 1); // cache : pas de 2e appel au 2e passage
 
   // Planification
   assert.match((await submit("/", "Enregistrer", { cronExpression: "pas un cron", cronEnabled: "on" })).headers.get("location") ?? "", /error=/);
