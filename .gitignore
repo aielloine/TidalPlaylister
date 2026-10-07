@@ -1,0 +1,7 @@
+node_modules
+.next
+lib/generated
+data
+.env*
+!.env.example
+next-env.d.ts

@@ -1,0 +1,3 @@
+/* MUI dans sa propre couche : les utilitaires Tailwind gardent la priorité. */
+@layer theme, base, mui, components, utilities;
+@import "tailwindcss";

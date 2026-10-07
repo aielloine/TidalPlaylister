@@ -1,0 +1,80 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+}
+
+// Singleton (id = 1) : un seul compte Tidal par instance.
+model TidalToken {
+  id           Int      @id @default(1)
+  tidalUserId  String
+  countryCode  String
+  accessToken  String
+  refreshToken String
+  expiresAt    DateTime
+  scope        String
+  updatedAt    DateTime @updatedAt
+}
+
+// Singleton (id = 1).
+model Settings {
+  id             Int     @id @default(1)
+  cronExpression String  @default("0 * * * *")
+  cronEnabled    Boolean @default(true)
+  dryRun         Boolean @default(true) // appliqué au cron ; le déclenchement manuel choisit le sien
+}
+
+// Un genre -> une playlist. Plusieurs genres peuvent pointer vers la même playlist.
+model Mapping {
+  id           Int      @id @default(autoincrement())
+  genre        String   @unique // normalisé en minuscules
+  playlistId   String
+  playlistName String // cache d'affichage, rafraîchi à la lecture des playlists
+  createdAt    DateTime @default(now())
+
+  @@index([playlistId])
+}
+
+// Genres rencontrés pendant les synchros : alimente l'autocomplétion des mappings
+// (l'API Tidal ne permet pas de lister tous les genres).
+model Genre {
+  name       String   @id // normalisé en minuscules
+  lastSeenAt DateTime @default(now()) @updatedAt
+}
+
+model SyncRun {
+  id         Int        @id @default(autoincrement())
+  trigger    String // "cron" | "manual"
+  dryRun     Boolean
+  status     String     @default("running") // "running" | "success" | "error"
+  moved      Int        @default(0)
+  skipped    Int        @default(0)
+  failed     Int        @default(0)
+  startedAt  DateTime   @default(now())
+  finishedAt DateTime?
+  logs       LogEntry[]
+
+  @@index([startedAt])
+}
+
+model LogEntry {
+  id        Int      @id @default(autoincrement())
+  runId     Int
+  run       SyncRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  level     String // "info" | "moved" | "skipped" | "error"
+  message   String
+  trackId   String?
+  createdAt DateTime @default(now())
+
+  @@index([runId])
+}

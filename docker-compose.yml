@@ -1,0 +1,8 @@
+services:
+  tidal-playlister:
+    image: ghcr.io/aielloine/tidalplaylister:latest
+    restart: unless-stopped
+    ports: ["3000:3000"]
+    env_file: .env # NEXTAUTH_URL, NEXTAUTH_SECRET, TIDAL_CLIENT_ID, TZ
+    volumes: ["./data:/app/data"] # doit être inscriptible par l'UID 1000
+    labels: ["com.centurylinklabs.watchtower.enable=true"]

@@ -1,0 +1,7 @@
+node_modules
+.next
+lib/generated
+data
+.env*
+.git
+test
