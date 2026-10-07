@@ -62,8 +62,9 @@ export async function createPlaylist(f: FormData) {
 
 export async function addMapping(playlistId: string, playlistName: string, f: FormData) {
   await requireUser();
-  // "rock, Indie Rock" -> ["rock", "indie rock"] ; un genre déjà mappé ailleurs est réassigné.
-  for (const genre of str(f, "genres").toLowerCase().split(",").map((g) => g.trim()).filter(Boolean))
+  // Champ "genres" : liste séparée par des virgules ; un genre déjà mappé ailleurs est réassigné.
+  const genres = f.getAll("genres").join(",").toLowerCase().split(",").map((g) => g.trim()).filter(Boolean);
+  for (const genre of new Set(genres))
     await prisma.mapping.upsert({
       where: { genre },
       update: { playlistId, playlistName },

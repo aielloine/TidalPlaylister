@@ -51,6 +51,10 @@ const fake = createServer(async (req, res) => {
     state.favorites = state.favorites.filter((id) => !rm.includes(id));
     return res.writeHead(204).end();
   }
+  if (p === "/v2/genres") {
+    assert.equal(url.searchParams.get("filter[id]"), "USER_SELECTABLE");
+    return json({ data: genreRes(["g1", "g2"]).concat({ id: "g4", type: "genres", attributes: { genreName: "Hip-Hop" } }), links: {} });
+  }
   if (p === "/v2/tracks") {
     assert.deepEqual(url.searchParams.getAll("include").sort(), ["albums", "artists", "genres"]);
     return json({
@@ -189,6 +193,9 @@ try {
   await submit("/playlists", "p2", { genres: "jazz, Blues" });
   const pl2 = await page("/playlists");
   assert.ok(pl2.includes("rock") && pl2.includes("blues"));
+  // Autocomplétion : genres Tidal non encore mappés (rock/jazz le sont déjà)
+  const options = JSON.parse(pl2.match(/\\"options\\":(\[[^\]]*\])/)[1].replaceAll('\\"', '"'));
+  assert.deepEqual(options, ["hip-hop"]);
 
   // Dry run : rien ne change sur Tidal
   await submit("/", "Dry run (simulation)");

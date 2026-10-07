@@ -1,7 +1,8 @@
 import { Alert, Button, Card, CardContent, Chip, TextField, Typography } from "@mui/material";
 import { addMapping, createPlaylist, deleteMapping } from "@/app/actions";
 import { prisma } from "@/lib/db";
-import { getPlaylists, type Playlist } from "@/lib/tidal";
+import GenrePicker from "@/components/GenrePicker";
+import { getPlaylists, getTidalGenres, type Playlist } from "@/lib/tidal";
 
 export const dynamic = "force-dynamic";
 
@@ -15,11 +16,9 @@ export default async function Playlists() {
 
   let playlists: Playlist[] = [];
   let error = "";
-  try {
-    playlists = await getPlaylists();
-  } catch (e) {
-    error = (e as Error).message;
-  }
+  const [pl, tidalGenres] = await Promise.allSettled([getPlaylists(), getTidalGenres()]);
+  if (pl.status === "fulfilled") playlists = pl.value;
+  else error = (pl.reason as Error).message;
   // Rafraîchit le nom en cache des mappings si la playlist a été renommée sur Tidal.
   for (const p of playlists)
     await prisma.mapping.updateMany({ where: { playlistId: p.id, NOT: { playlistName: p.name } }, data: { playlistName: p.name } });
@@ -32,6 +31,10 @@ export default async function Playlists() {
   const known = new Set(playlists.map((p) => p.id));
   const orphans = error ? [] : mappings.filter((m) => !known.has(m.playlistId));
   const unmapped = genres.filter((g) => !mapped.has(g.name));
+  // Autocomplétion : genres Tidal officiels + genres rencontrés sur vos titres, hors genres déjà mappés.
+  const options = [...new Set([...(tidalGenres.status === "fulfilled" ? tidalGenres.value : []), ...genres.map((g) => g.name)])]
+    .filter((g) => !mapped.has(g))
+    .sort();
 
   return (
     <main className="mx-auto flex max-w-6xl flex-col gap-4 p-4">
@@ -64,11 +67,6 @@ export default async function Playlists() {
         </Card>
       )}
 
-      <datalist id="genres">
-        {unmapped.map((g) => (
-          <option key={g.name} value={g.name} />
-        ))}
-      </datalist>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {playlists.map((p) => {
@@ -94,19 +92,7 @@ export default async function Playlists() {
                     </form>
                   ))}
                 </div>
-                <form action={addMapping.bind(null, p.id, p.name)} className="mt-auto flex gap-2">
-                  <TextField
-                    name="genres"
-                    label="Ajouter genre(s), séparés par des virgules"
-                    size="small"
-                    required
-                    className="flex-1"
-                    slotProps={{ htmlInput: { list: "genres" } }}
-                  />
-                  <Button type="submit" variant="outlined">
-                    +
-                  </Button>
-                </form>
+                <GenrePicker action={addMapping.bind(null, p.id, p.name)} options={options} />
               </CardContent>
             </Card>
           );

@@ -178,6 +178,12 @@ export async function removeFavorites(trackIds: string[]) {
 
 // ---------- Genres ----------
 
+// Liste officielle des genres Tidal (l'API n'expose pas d'autre moyen de tous les lister).
+export async function getTidalGenres() {
+  const data = await all(`/genres?filter[id]=USER_SELECTABLE&locale=en-US`);
+  return data.map((g) => String(g.attributes?.genreName ?? "").trim().toLowerCase()).filter(Boolean);
+}
+
 export type TrackInfo = { id: string; label: string; genres: string[] };
 
 const rel = (r: Resource, name: string) => r.relationships?.[name]?.data?.map((d) => d.id) ?? [];
