@@ -1,8 +1,33 @@
 services:
-  tidal-playlister:
+  tidalplaylister:
     image: ghcr.io/aielloine/tidalplaylister:latest
-    restart: unless-stopped
-    ports: ["3000:3000"]
-    env_file: .env # NEXTAUTH_URL, NEXTAUTH_SECRET, TIDAL_CLIENT_ID, TZ
-    volumes: ["./data:/app/data"] # doit être inscriptible par l'UID 1000
-    labels: ["com.centurylinklabs.watchtower.enable=true"]
+    restart: always
+    user: "1026:101"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/login').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    volumes:
+      - ${TIDAL_DIR}/data:/app/data
+    environment:
+      NEXTAUTH_URL: https://tidal.aielloine.com
+      NEXTAUTH_SECRET: changeme # openssl rand -base64 32
+      TIDAL_CLIENT_ID: changeme # https://developer.tidal.com/dashboard
+      TZ: Europe/Paris
+    networks:
+      - proxy
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+      - traefik.enable=true
+      - traefik.http.routers.tidalplaylister.entrypoints=web,websecure
+      - traefik.http.routers.tidalplaylister.rule=Host(`tidal.aielloine.com`)
+      - traefik.http.routers.tidalplaylister.tls=true
+      - traefik.http.routers.tidalplaylister.service=tidalplaylister
+      - traefik.http.routers.tidalplaylister.tls.certresolver=production
+      - traefik.docker.network=proxy
+      - traefik.http.services.tidalplaylister.loadbalancer.server.port=3000
+
+networks:
+  proxy:
+    external: true
