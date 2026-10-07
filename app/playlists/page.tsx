@@ -39,6 +39,17 @@ export default async function Playlists() {
   return (
     <main className="mx-auto flex max-w-6xl flex-col gap-4 p-4">
       {error && <Alert severity="error">Lecture des playlists impossible : {error}</Alert>}
+      {tidalGenres.status === "rejected" && (
+        <Alert severity="warning">Liste des genres Tidal indisponible : {(tidalGenres.reason as Error).message}</Alert>
+      )}
+      {tidalGenres.status === "fulfilled" && !tidalGenres.value.length && (
+        <Alert severity="warning">Tidal a renvoyé une liste de genres vide.</Alert>
+      )}
+      {!genres.length && (
+        <Alert severity="info">
+          Lancez un Dry Run depuis le dashboard : les genres de vos favoris seront ajoutés aux suggestions.
+        </Alert>
+      )}
 
       <Card>
         <CardContent className="flex flex-col gap-3 md:flex-row md:items-center">
