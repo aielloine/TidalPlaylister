@@ -32,12 +32,15 @@ model Settings {
   cronExpression String  @default("0 * * * *")
   cronEnabled    Boolean @default(true)
   dryRun         Boolean @default(true) // appliqué au cron ; le déclenchement manuel choisit le sien
+  ignoredGenres  String  @default("films/jeux vidéo,musiques de films,seen live,favorites,favourites") // séparés par des virgules
 }
 
-// Un genre -> une playlist. Plusieurs genres peuvent pointer vers la même playlist.
+// Un genre (ou tag Last.fm) -> une playlist. Plusieurs genres peuvent pointer vers la même playlist.
+// Quand un titre a plusieurs genres mappés, le plus prioritaire gagne (spécifique avant générique).
 model Mapping {
   id           Int      @id @default(autoincrement())
   genre        String   @unique // normalisé en minuscules
+  priority     Int      @default(0)
   playlistId   String
   playlistName String // cache d'affichage, rafraîchi à la lecture des playlists
   createdAt    DateTime @default(now())

@@ -1,6 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { prisma } from "./db";
 import { deezerGenres } from "./deezer";
+import { usable } from "./genres";
+import { lastfmTags } from "./lastfm";
 
 // Surchargeables pour les tests (faux serveur Tidal).
 const API = process.env.TIDAL_API_URL ?? "https://openapi.tidal.com/v2";
@@ -146,11 +148,12 @@ export async function getPlaylists(): Promise<Playlist[]> {
   return data.map((p) => ({ id: p.id, name: p.attributes?.name, tracks: p.attributes?.numberOfTrackItems ?? 0 }));
 }
 
-export async function createPlaylist(name: string) {
-  await api("/playlists", {
+export async function createPlaylist(name: string): Promise<string> {
+  const doc = await api("/playlists", {
     method: "POST",
     body: JSON.stringify({ data: { type: "playlists", attributes: { name, accessType: "UNLISTED" } } }),
   });
+  return (doc.data as Resource).id;
 }
 
 export async function addToPlaylist(playlistId: string, trackIds: string[]) {
@@ -186,14 +189,17 @@ export async function getTidalGenres() {
   return data.map((g) => String(g.attributes?.genreName ?? "").trim().toLowerCase()).filter(Boolean);
 }
 
-export type TrackInfo = { id: string; label: string; genres: string[] };
+export type TrackInfo = { id: string; label: string; artist: string; title: string; isrc?: string; genres: string[] };
 
 const rel = (r: Resource, name: string) => r.relationships?.[name]?.data?.map((d) => d.id) ?? [];
 const genreNames = (ids: string[], byId: Map<string, Resource>) =>
   ids.map((id) => byId.get(id)?.attributes?.genreName?.trim().toLowerCase()).filter(Boolean) as string[];
 
-// Genre de la piste ; à défaut, genre(s) de l'album Tidal ; à défaut, genres Deezer via l'ISRC.
-export async function resolveTracks(trackIds: string[]): Promise<TrackInfo[]> {
+// Genres candidats, du plus fin au plus générique :
+//   1. tags Last.fm (titre, puis artiste si peu de tags), triés par score ;
+//   2. premier repli exploitable parmi : genre de la piste Tidal → genre de l'album Tidal → genres Deezer (ISRC).
+// Un repli est sauté s'il est vide, entièrement ignoré, ou s'il a plus de COMPILATION_THRESHOLD genres.
+export async function resolveTracks(trackIds: string[], ignored = new Set<string>()): Promise<TrackInfo[]> {
   const cc = await country();
   const out: TrackInfo[] = [];
   for (const ids of chunk(trackIds, 20)) {
@@ -205,26 +211,34 @@ export async function resolveTracks(trackIds: string[]): Promise<TrackInfo[]> {
     const genres = get("genres");
     const artists = get("artists");
     const tracks = doc.data as Resource[];
+    const own = new Map(tracks.map((t) => [t.id, usable(genreNames(rel(t, "genres"), genres), ignored)]));
 
-    const albumIds = [...new Set(tracks.filter((t) => !rel(t, "genres").length).map((t) => rel(t, "albums")[0]).filter(Boolean))];
+    const albumIds = [...new Set(tracks.filter((t) => !own.get(t.id)!.length).map((t) => rel(t, "albums")[0]).filter(Boolean))];
     const albumGenres = new Map<string, string[]>();
     for (const aIds of chunk(albumIds, 20)) {
       const a = await api(
         `/albums?${qs([...aIds.map((id): [string, string] => ["filter[id]", id]), ["include", "genres"], ["countryCode", cc]])}`,
       );
       const ag = new Map((a.included ?? []).filter((r) => r.type === "genres").map((r) => [r.id, r]));
-      for (const album of a.data as Resource[]) albumGenres.set(album.id, genreNames(rel(album, "genres"), ag));
+      for (const album of a.data as Resource[]) albumGenres.set(album.id, usable(genreNames(rel(album, "genres"), ag), ignored));
     }
 
     for (const t of tracks) {
-      const own = genreNames(rel(t, "genres"), genres);
-      const tidalGenres = own.length ? own : (albumGenres.get(rel(t, "albums")[0]) ?? []);
       const isrc = t.attributes?.isrc as string | undefined;
-      const artist = rel(t, "artists").map((id) => artists.get(id)?.attributes?.name).filter(Boolean).join(", ");
+      const names = rel(t, "artists").map((id) => artists.get(id)?.attributes?.name as string).filter(Boolean);
+      const title = (t.attributes?.title as string) ?? t.id;
+      let fallback = own.get(t.id)!;
+      if (!fallback.length) fallback = albumGenres.get(rel(t, "albums")[0]) ?? [];
+      if (!fallback.length && isrc) fallback = usable(await deezerGenres(isrc), ignored);
+      // Pas de seuil « compilation » ici : Last.fm renvoie naturellement beaucoup de tags.
+      const tags = (await lastfmTags(names[0] ?? "", title)).filter((x) => !ignored.has(x));
       out.push({
         id: t.id,
-        label: `${artist || "?"} — ${t.attributes?.title ?? t.id}`,
-        genres: tidalGenres.length || !isrc ? tidalGenres : await deezerGenres(isrc),
+        label: `${names.join(", ") || "?"} — ${title}`,
+        artist: names[0] ?? "",
+        title,
+        isrc,
+        genres: [...new Set([...tags, ...fallback])],
       });
     }
   }
