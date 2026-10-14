@@ -10,16 +10,24 @@ const APP = "http://127.0.0.1:3999";
 const FAKE = "http://127.0.0.1:4010";
 
 // ---------- Faux Tidal ----------
-const genres = { g1: "Rock", g2: "Jazz", g3: "Electro" };
+const genres = { g1: "Rock", g2: "Jazz", g3: "Electro", g5: "Pop", g6: "Funk", g7: "Musiques de films" };
 const tracks = {
   t1: { title: "Song One", genres: ["g1"], album: "a1" }, // genre piste -> rock
   t2: { title: "Song Two", genres: [], album: "a2" }, // genre album -> jazz
   t3: { title: "Song Three", genres: [], album: "a3" }, // aucun genre
   t4: { title: "Song Four", genres: ["g3"], album: "a1" }, // electro, non mappé
   t5: { title: "Song Five", genres: [], album: "a3", isrc: "ISRC5" }, // rien chez Tidal -> Deezer : reggae
+  t6: { title: "Song Six", genres: [], album: "a4", isrc: "ISRC6" }, // album compilation (5 genres) -> Deezer : rap
+  t7: { title: "Song One (Radio Edit)", genres: ["g1"], album: "a1", isrc: "ISRC7" }, // doublon de t1 (artiste + titre)
+  t8: { title: "Song Eight", genres: ["g7"], album: "a1" }, // genre ignoré -> Last.fm : indie folk
 };
-const albums = { a1: [], a2: ["g2"], a3: [] };
-const state = { favorites: ["t1", "t2", "t3", "t4", "t5"], added: {}, created: [], deezerIsrcs: [] };
+const albums = { a1: [], a2: ["g2"], a3: [], a4: ["g1", "g2", "g3", "g5", "g6"] };
+// Faux Last.fm : tags par titre ; l'artiste n'a qu'un tag non mappé (complète les titres avec < 3 tags).
+const lastfmTracks = {
+  "Song Eight": [{ name: "Indie Folk", count: 100 }, { name: "seen live", count: 90 }, { name: "mellow", count: 10 }],
+};
+const lastfmCalls = [];
+const state = { favorites: ["t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8"], added: {}, created: [], deezerIsrcs: [] };
 
 const fake = createServer(async (req, res) => {
   const url = new URL(req.url, FAKE);
@@ -34,7 +42,16 @@ const fake = createServer(async (req, res) => {
   if (p.startsWith("/deezer/track/isrc:")) {
     const isrc = decodeURIComponent(p.split(":")[1]);
     state.deezerIsrcs.push(isrc);
+    if (isrc === "ISRC6") return json({ id: 6, album: { id: 66 } });
     return json(isrc === "ISRC5" ? { id: 5, album: { id: 55 } } : { error: { type: "DataException", code: 800 } });
+  }
+  if (p === "/deezer/album/66") return json({ id: 66, genres: { data: [{ id: 116, name: "Rap/Hip Hop" }, { id: 117, name: "Rap français" }] } });
+  if (p === "/lastfm/") {
+    assert.equal(url.searchParams.get("api_key"), "lfm");
+    const method = url.searchParams.get("method");
+    lastfmCalls.push(`${method}:${url.searchParams.get("track") ?? url.searchParams.get("artist")}`);
+    if (method === "track.gettoptags") return json({ toptags: { tag: lastfmTracks[url.searchParams.get("track")] ?? [] } });
+    if (method === "artist.gettoptags") return json({ toptags: { tag: { name: "Artist Tag", count: 100 } } }); // objet seul
   }
   if (p === "/deezer/album/55") return json({ id: 55, genres: { data: [{ id: 2, name: "Reggae" }] } });
   if (p === "/deezer/genre") return json({ data: [{ id: 0, name: "All" }, { id: 1, name: "Pop" }, { id: 2, name: "Reggae" }] });
@@ -107,6 +124,8 @@ const env = {
   TIDAL_API_URL: `${FAKE}/v2`,
   TIDAL_TOKEN_URL: `${FAKE}/token`,
   DEEZER_API_URL: `${FAKE}/deezer`,
+  LASTFM_API_URL: `${FAKE}/lastfm/`,
+  LASTFM_API_KEY: "lfm",
   PORT: "3999",
   HOSTNAME: "127.0.0.1",
 };
@@ -202,6 +221,10 @@ try {
   assert.deepEqual(state.created, ["Nouvelle"]);
   await submit("/playlists", "p1", { genres: "Rock" });
   await submit("/playlists", "p2", { genres: "jazz, Blues" });
+  await submit("/playlists", "p1", { genres: "Rap/Hip Hop" }); // générique : priorité auto 0
+  await submit("/playlists", "p2", { genres: "rap français" }); // spécifique : priorité auto 10
+  await submit("/playlists", "Indie / folk calme"); // ambiance : crée la playlist p9 + tags
+  assert.deepEqual(state.created, ["Nouvelle", "Indie / folk calme"]);
   const pl2 = await page("/playlists");
   assert.ok(pl2.includes("rock") && pl2.includes("blues"));
   // Autocomplétion : genres Tidal non encore mappés (rock/jazz le sont déjà)
@@ -212,25 +235,36 @@ try {
   await submit("/", "Dry run (simulation)");
   await waitIdle();
   let dash = await page("/");
-  assert.match(dash, /\[DRY RUN\] Artist — Song One → « Rock » \(rock\)/);
-  assert.match(dash, /\[DRY RUN\] Artist — Song Two → « Jazz » \(jazz\)/);
-  assert.match(dash, /Song Three — aucun genre : reste en favori/);
-  assert.match(dash, /Song Four — genre non mappé \(electro\) : reste en favori/);
-  assert.match(dash, /Song Five — genre non mappé \(reggae\) : reste en favori/);
-  assert.deepEqual(state.deezerIsrcs.sort(), ["ISRC-t3", "ISRC5"]); // Deezer seulement sans genre Tidal
+  assert.match(dash, /Last\.fm actif/);
+  assert.match(dash, /\[DRY RUN\] Artist — Song One → « Rock » via rock \(artist tag\)/);
+  assert.match(dash, /\[DRY RUN\] Artist — Song One \(Radio Edit\) — doublon de t1 : retiré des favoris/);
+  assert.match(dash, /\[DRY RUN\] Artist — Song Two → « Jazz » via jazz/);
+  assert.match(dash, /Song Three — genre non mappé \(artist tag\) : reste en favori/);
+  assert.match(dash, /Song Four — genre non mappé \(artist tag, electro\) : reste en favori/);
+  assert.match(dash, /Song Five — genre non mappé \(artist tag, reggae\) : reste en favori/);
+  // Compilation Tidal ignorée -> Deezer ; « rap français » (prio 10) bat « rap/hip hop » (prio 0)
+  assert.match(dash, /Song Six → « Jazz » via rap français \(artist tag, rap\/hip hop\)/);
+  // « musiques de films » et « seen live » ignorés, « mellow » sous le seuil -> indie folk (mappé par l'ambiance)
+  assert.match(dash, /Song Eight → « Indie \/ folk calme » via indie folk \(artist tag\)/);
+  assert.deepEqual(state.deezerIsrcs.sort(), ["ISRC-t3", "ISRC-t8", "ISRC5", "ISRC6"]); // Deezer seulement sans genre Tidal exploitable
+  assert.ok(lastfmCalls.includes("track.gettoptags:Song Eight") && lastfmCalls.includes("artist.gettoptags:Artist"));
+  assert.equal(lastfmCalls.filter((c) => c === "artist.gettoptags:Artist").length, 1); // cache artiste
   assert.deepEqual(state.added, {});
-  assert.equal(state.favorites.length, 5);
+  assert.equal(state.favorites.length, 8);
 
   // Réel
   await submit("/", "Synchronisation réelle");
   await waitIdle();
-  assert.deepEqual(state.added, { p1: ["t1"], p2: ["t2"] });
-  assert.deepEqual(state.favorites, ["t3", "t4", "t5"]);
+  assert.deepEqual(state.added, { p1: ["t1"], p2: ["t2", "t6"], p9: ["t8"] }); // doublon t7 non ajouté
+  assert.deepEqual(state.favorites, ["t3", "t4", "t5"]); // mais retiré des favoris
   dash = await page("/");
-  assert.match(dash, /Titres triés \(total\)[\s\S]*?>2</);
+  assert.match(dash, /Titres triés \(total\)[\s\S]*?>5</);
 
   // Genres détectés proposés au mapping
-  assert.match(await page("/playlists"), /Genres détectés non mappés[\s\S]*electro[\s\S]*reggae/);
+  const pl3 = await page("/playlists");
+  assert.match(pl3, /Genres détectés non mappés[\s\S]*electro[\s\S]*reggae/);
+  const unmappedCard = pl3.slice(pl3.indexOf("Genres détectés non mappés"), pl3.indexOf("Playlists d"));
+  assert.ok(unmappedCard.includes("artist tag") && !unmappedCard.includes("musiques de films"), "genres ignorés masqués");
   assert.equal(state.deezerIsrcs.filter((i) => i === "ISRC5").length, 1); // cache : pas de 2e appel au 2e passage
 
   // Planification

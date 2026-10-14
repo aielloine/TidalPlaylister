@@ -4,7 +4,9 @@ import cron from "node-cron";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { hashPassword, requireUser } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { getSettings, prisma } from "@/lib/db";
+import { defaultPriority, parseList } from "@/lib/genres";
+import { MOODS } from "@/lib/moods";
 import { startScheduler } from "@/lib/scheduler";
 import { isSyncRunning, runSync } from "@/lib/sync";
 import * as tidal from "@/lib/tidal";
@@ -60,16 +62,52 @@ export async function createPlaylist(f: FormData) {
   revalidatePath("/playlists");
 }
 
+const priorityOf = (f: FormData) => {
+  const v = str(f, "priority");
+  return v === "" || !Number.isFinite(Number(v)) ? undefined : Math.round(Number(v));
+};
+
 export async function addMapping(playlistId: string, playlistName: string, f: FormData) {
   await requireUser();
   // Champ "genres" : liste séparée par des virgules ; un genre déjà mappé ailleurs est réassigné.
-  const genres = f.getAll("genres").join(",").toLowerCase().split(",").map((g) => g.trim()).filter(Boolean);
-  for (const genre of new Set(genres))
+  // Priorité vide = automatique (0 pour un genre générique, 10 sinon).
+  const priority = priorityOf(f);
+  for (const genre of parseList(f.getAll("genres").join(","))) {
+    const p = priority ?? defaultPriority(genre);
     await prisma.mapping.upsert({
       where: { genre },
-      update: { playlistId, playlistName },
-      create: { genre, playlistId, playlistName },
+      update: { playlistId, playlistName, priority: p },
+      create: { genre, playlistId, playlistName, priority: p },
     });
+  }
+  revalidatePath("/playlists");
+}
+
+export async function setMappingPriority(id: number, f: FormData) {
+  await requireUser();
+  const priority = priorityOf(f);
+  if (priority !== undefined) await prisma.mapping.update({ where: { id }, data: { priority } });
+  revalidatePath("/playlists");
+}
+
+export async function saveIgnoredGenres(f: FormData) {
+  await requireUser();
+  await getSettings();
+  await prisma.settings.update({ where: { id: 1 }, data: { ignoredGenres: parseList(str(f, "ignoredGenres")).join(",") } });
+  revalidatePath("/playlists");
+}
+
+// Crée (ou réutilise, par nom) la playlist d'ambiance et y mappe ses tags encore libres.
+export async function applyMood(index: number) {
+  await requireUser();
+  const mood = MOODS[index];
+  if (!mood) return;
+  const existing = (await tidal.getPlaylists()).find((p) => p.name.toLowerCase() === mood.name.toLowerCase());
+  const playlistId = existing?.id ?? (await tidal.createPlaylist(mood.name));
+  const taken = new Set((await prisma.mapping.findMany({ select: { genre: true } })).map((m) => m.genre));
+  const wanted: [string, number][] = [...mood.tags.map((t): [string, number] => [t, mood.priority]), ...(mood.generic ?? []).map((t): [string, number] => [t, 1])];
+  for (const [genre, priority] of wanted)
+    if (!taken.has(genre) && taken.add(genre)) await prisma.mapping.create({ data: { genre, priority, playlistId, playlistName: existing?.name ?? mood.name } });
   revalidatePath("/playlists");
 }
 

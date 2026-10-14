@@ -14,6 +14,7 @@ services:
       NEXTAUTH_URL: https://tidal.aielloine.com
       NEXTAUTH_SECRET: changeme # openssl rand -base64 32
       TIDAL_CLIENT_ID: changeme # https://developer.tidal.com/dashboard
+      LASTFM_API_KEY: changeme # https://www.last.fm/api/account/create (optionnel)
       TZ: Europe/Paris
     networks:
       - proxy
