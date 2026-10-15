@@ -76,7 +76,7 @@ export async function runSync({ dryRun, trigger }: { dryRun: boolean; trigger: "
     const prefix = dryRun ? "[DRY RUN] " : "";
     const favNote = keep ? " (reste en favori)" : "";
     for (const [playlistId, { name, entries }] of byPlaylist) {
-      const allIds = entries.flatMap((e) => [e.main.id, ...e.dups.map((d) => d.id)]);
+      const allIds = [...new Set(entries.flatMap((e) => [e.main.id, ...e.dups.map((d) => d.id)]))];
       try {
         // Jamais de doublon dans la playlist : on saute les titres (ou un de leurs doublons) déjà présents.
         const present = await getPlaylistTrackIds(playlistId);
@@ -84,7 +84,9 @@ export async function runSync({ dryRun, trigger }: { dryRun: boolean; trigger: "
         const toAdd = entries.filter((e) => !isPresent(e));
         if (!dryRun) {
           await addToPlaylist(playlistId, toAdd.map((e) => e.main.id));
-          await prisma.processedTrack.createMany({ data: allIds.map((trackId) => ({ trackId, playlistId })) });
+          // upsert un par un : robuste aux doublons d'ID et aux enregistrements d'un passage interrompu.
+          for (const trackId of allIds)
+            await prisma.processedTrack.upsert({ where: { trackId }, update: {}, create: { trackId, playlistId } });
           // Retrait des favoris seulement après un ajout réussi : en cas d'erreur, le titre reste en favori.
           if (!keep) await removeFavorites(allIds);
         }
