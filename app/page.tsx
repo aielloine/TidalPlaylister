@@ -70,7 +70,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         </Stat>
         <Stat label="Prochaine synchro (cron)" value={settings.cronEnabled ? fmt(next) : "Désactivée"}>
           <Typography variant="caption" color="text.secondary">
-            {settings.cronExpression} · {settings.dryRun ? "dry run" : "réel"}
+            {settings.cronExpression} · {settings.dryRun ? "dry run" : "réel"} · favoris {settings.removeFromFavorites ? "retirés" : "conservés"}
           </Typography>
         </Stat>
         <Stat label="Titres triés (total)" value={String(totals._sum.moved ?? 0)}>
@@ -100,7 +100,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
         <Card className="md:col-span-2">
           <CardContent>
-            <Typography variant="overline">Planification</Typography>
+            <Typography variant="overline">Planification et comportement</Typography>
             <form action={saveSettings} className="mt-2 flex flex-col gap-3">
               <TextField
                 name="cronExpression"
@@ -115,7 +115,20 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                   <option key={c} value={c} label={l} />
                 ))}
               </datalist>
+              <TextField
+                name="scanLimit"
+                label="Favoris analysés par passage"
+                type="number"
+                defaultValue={settings.scanLimit}
+                size="small"
+                slotProps={{ htmlInput: { min: 0, step: 1 } }}
+                helperText="Les N favoris les plus récents, en dry run comme en réel. 0 = tous (les titres déjà classés ne sont pas ré-analysés)."
+              />
               <div className="flex flex-wrap items-center gap-4">
+                <FormControlLabel
+                  control={<Switch name="removeFromFavorites" defaultChecked={settings.removeFromFavorites} />}
+                  label="Retirer des favoris après classement"
+                />
                 <FormControlLabel control={<Switch name="cronEnabled" defaultChecked={settings.cronEnabled} />} label="Cron actif" />
                 <FormControlLabel
                   control={<Switch name="dryRun" defaultChecked={settings.dryRun} color="warning" />}
@@ -133,7 +146,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       <Card>
         <CardContent>
           <Typography variant="overline">
-            Logs {lastRun && `— synchro #${lastRun.id} (${lastRun.moved} déplacé(s), ${lastRun.skipped} ignoré(s), ${lastRun.failed} en échec)`}
+            Logs {lastRun && `— synchro #${lastRun.id} (${lastRun.moved} classé(s), ${lastRun.skipped} ignoré(s), ${lastRun.failed} en échec)`}
           </Typography>
           <pre className="mt-2 max-h-[32rem] overflow-auto rounded bg-black/60 p-3 text-xs leading-relaxed">
             {lastRun?.logs.length

@@ -1,11 +1,8 @@
 import { getSettings, prisma } from "./db";
 import { groupDuplicates, parseList, pickMapping } from "./genres";
 import { lastfmEnabled } from "./lastfm";
-import { addToPlaylist, getFavoriteTrackIds, removeFavorites, resolveTracks, type TrackInfo as Track } from "./tidal";
+import { addToPlaylist, getFavoriteTrackIds, getPlaylistTrackIds, removeFavorites, resolveTracks, type TrackInfo as Track } from "./tidal";
 
-// ponytail: seuls les N favoris les plus récents sont analysés à chaque passage (les titres triés sortent
-// des favoris, donc la fenêtre avance). Monter la valeur si des titres anciens doivent être rattrapés.
-const SCAN_LIMIT = 300;
 const KEEP_LOG_RUNS = 50;
 
 const g = globalThis as unknown as { syncRunning?: boolean };
@@ -24,20 +21,37 @@ export async function runSync({ dryRun, trigger }: { dryRun: boolean; trigger: "
     await prisma.logEntry.deleteMany({ where: { runId: { lte: run.id - KEEP_LOG_RUNS } } });
     await log("info", `Démarrage (${trigger}${dryRun ? ", DRY RUN : aucune modification sur Tidal" : ""})`);
 
+    const settings = await getSettings();
+    const keep = !settings.removeFromFavorites;
     const mappings = new Map((await prisma.mapping.findMany()).map((m) => [m.genre, m]));
-    const ignored = new Set(parseList((await getSettings()).ignoredGenres));
-    const ids = await getFavoriteTrackIds(SCAN_LIMIT);
+    const ignored = new Set(parseList(settings.ignoredGenres));
+    // Même fenêtre en dry run et en réel : les N favoris les plus récents (0 = tous).
+    const ids = await getFavoriteTrackIds(settings.scanLimit);
     await log(
       "info",
-      `${ids.length} favori(s) analysé(s), ${mappings.size} genre(s) mappé(s), Last.fm ${lastfmEnabled() ? "actif" : "inactif (LASTFM_API_KEY absent)"}`,
+      `${ids.length} favori(s) analysé(s) (${settings.scanLimit ? `${settings.scanLimit} plus récents max` : "tous"}), ` +
+        `${mappings.size} genre(s) mappé(s), Last.fm ${lastfmEnabled() ? "actif" : "inactif (LASTFM_API_KEY absent)"}, ` +
+        `favoris ${keep ? "conservés" : "retirés après classement"}`,
     );
 
-    const tracks = await resolveTracks(ids, ignored);
+    // Titres déjà classés lors d'un passage précédent : jamais ré-ajoutés (même retirés de la playlist à la main).
+    const done = new Set((await prisma.processedTrack.findMany({ select: { trackId: true } })).map((p) => p.trackId));
+    const already = ids.filter((id) => done.has(id));
+    if (already.length) {
+      // Mode « retirer » : finit le déplacement (retrait raté, ou bascule depuis le mode « conserver »).
+      if (!keep && !dryRun) await removeFavorites(already);
+      await log(
+        "info",
+        `${dryRun ? "[DRY RUN] " : ""}${already.length} titre(s) déjà classé(s) : non ré-ajouté(s)${keep ? "" : ", retiré(s) des favoris"}`,
+      );
+    }
+
+    const tracks = await resolveTracks(ids.filter((id) => !done.has(id)), ignored);
     const seen = new Set(tracks.flatMap((t) => t.genres));
     for (const name of seen) await prisma.genre.upsert({ where: { name }, update: {}, create: { name } });
 
     // Doublons (même ISRC ou même artiste + titre normalisé) : un seul exemplaire va dans la playlist,
-    // tous sortent des favoris. Le premier est le favori le plus récent.
+    // tous sortent des favoris (mode « retirer »). Le premier est le favori le plus récent.
     type Entry = { main: Track; dups: Track[]; genre: string };
     const byPlaylist = new Map<string, { name: string; entries: Entry[] }>();
     for (const [main, ...dups] of groupDuplicates(tracks)) {
@@ -59,20 +73,33 @@ export async function runSync({ dryRun, trigger }: { dryRun: boolean; trigger: "
       byPlaylist.set(m.playlistId, group);
     }
 
+    const prefix = dryRun ? "[DRY RUN] " : "";
+    const favNote = keep ? " (reste en favori)" : "";
     for (const [playlistId, { name, entries }] of byPlaylist) {
       const allIds = entries.flatMap((e) => [e.main.id, ...e.dups.map((d) => d.id)]);
-      const prefix = dryRun ? "[DRY RUN] " : "";
       try {
+        // Jamais de doublon dans la playlist : on saute les titres (ou un de leurs doublons) déjà présents.
+        const present = await getPlaylistTrackIds(playlistId);
+        const isPresent = (e: Entry) => [e.main, ...e.dups].some((t) => present.has(t.id));
+        const toAdd = entries.filter((e) => !isPresent(e));
         if (!dryRun) {
-          await addToPlaylist(playlistId, entries.map((e) => e.main.id));
+          await addToPlaylist(playlistId, toAdd.map((e) => e.main.id));
+          await prisma.processedTrack.createMany({ data: allIds.map((trackId) => ({ trackId, playlistId })) });
           // Retrait des favoris seulement après un ajout réussi : en cas d'erreur, le titre reste en favori.
-          await removeFavorites(allIds);
+          if (!keep) await removeFavorites(allIds);
         }
-        counts.moved += allIds.length;
-        for (const { main, dups, genre } of entries) {
-          const others = main.genres.filter((x) => x !== genre).slice(0, 5);
-          await log("moved", `${prefix}${main.label} → « ${name} » via ${genre}${others.length ? ` (${others.join(", ")})` : ""}`, main.id);
-          for (const d of dups) await log("moved", `${prefix}${d.label} — doublon de ${main.id} : retiré des favoris`, d.id);
+        counts.moved += keep ? toAdd.length : allIds.length;
+        counts.skipped += keep ? entries.length - toAdd.length : 0;
+        for (const e of entries) {
+          const { main, dups, genre } = e;
+          if (isPresent(e)) {
+            await log("info", `${prefix}${main.label} — déjà dans « ${name} » : non ré-ajouté${keep ? "" : ", retiré des favoris"}`, main.id);
+          } else {
+            const others = main.genres.filter((x) => x !== genre).slice(0, 5);
+            await log("moved", `${prefix}${main.label} → « ${name} » via ${genre}${others.length ? ` (${others.join(", ")})` : ""}${favNote}`, main.id);
+          }
+          for (const d of dups)
+            await log("moved", `${prefix}${d.label} — doublon de ${main.id} : ${keep ? "non ajouté (reste en favori)" : "retiré des favoris"}`, d.id);
         }
       } catch (e) {
         counts.failed += allIds.length;
@@ -80,7 +107,7 @@ export async function runSync({ dryRun, trigger }: { dryRun: boolean; trigger: "
       }
     }
 
-    await log("info", `Terminé : ${counts.moved} déplacé(s), ${counts.skipped} ignoré(s), ${counts.failed} en échec`);
+    await log("info", `Terminé : ${counts.moved} classé(s), ${counts.skipped} ignoré(s), ${counts.failed} en échec`);
     return await prisma.syncRun.update({
       where: { id: run.id },
       data: { ...counts, status: counts.failed ? "error" : "success", finishedAt: new Date() },

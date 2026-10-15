@@ -20,6 +20,7 @@ const tracks = {
   t6: { title: "Song Six", genres: [], album: "a4", isrc: "ISRC6" }, // album compilation (5 genres) -> Deezer : rap
   t7: { title: "Song One (Radio Edit)", genres: ["g1"], album: "a1", isrc: "ISRC7" }, // doublon de t1 (artiste + titre)
   t8: { title: "Song Eight", genres: ["g7"], album: "a1" }, // genre ignoré -> Last.fm : indie folk
+  t9: { title: "Song Nine", genres: ["g1"], album: "a1" }, // liké plus tard, en mode « conserver »
 };
 const albums = { a1: [], a2: ["g2"], a3: [], a4: ["g1", "g2", "g3", "g5", "g6"] };
 // Faux Last.fm : tags par titre ; l'artiste n'a qu'un tag non mappé (complète les titres avec < 3 tags).
@@ -27,7 +28,7 @@ const lastfmTracks = {
   "Song Eight": [{ name: "Indie Folk", count: 100 }, { name: "seen live", count: 90 }, { name: "mellow", count: 10 }],
 };
 const lastfmCalls = [];
-const state = { favorites: ["t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8"], added: {}, created: [], deezerIsrcs: [] };
+const state = { favorites: ["t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8"], added: {}, manual: {}, created: [], deezerIsrcs: [] };
 
 const fake = createServer(async (req, res) => {
   const url = new URL(req.url, FAKE);
@@ -104,6 +105,8 @@ const fake = createServer(async (req, res) => {
       included: genreRes(ids.flatMap((id) => albums[id])),
     });
   const m = p.match(/^\/v2\/playlists\/(\w+)\/relationships\/items$/);
+  if (m && req.method === "GET")
+    return json({ data: [...(state.manual[m[1]] ?? []), ...(state.added[m[1]] ?? [])].map((id) => ({ id, type: "tracks" })), links: {} });
   if (m && req.method === "POST") {
     assert.equal(JSON.parse(body).meta.onDuplicates, "SKIP");
     (state.added[m[1]] ??= []).push(...JSON.parse(body).data.map((d) => d.id));
@@ -252,13 +255,33 @@ try {
   assert.deepEqual(state.added, {});
   assert.equal(state.favorites.length, 8);
 
-  // Réel
+  // Réel (t6 a été ajouté à la main dans « Jazz » entre-temps)
+  state.manual.p2 = ["t6"];
   await submit("/", "Synchronisation réelle");
   await waitIdle();
-  assert.deepEqual(state.added, { p1: ["t1"], p2: ["t2", "t6"], p9: ["t8"] }); // doublon t7 non ajouté
-  assert.deepEqual(state.favorites, ["t3", "t4", "t5"]); // mais retiré des favoris
+  assert.deepEqual(state.added, { p1: ["t1"], p2: ["t2"], p9: ["t8"] }); // doublon t7 non ajouté, t6 déjà dans p2
+  assert.deepEqual(state.favorites, ["t3", "t4", "t5"]); // mais retirés des favoris
   dash = await page("/");
+  assert.match(dash, /Song Six — déjà dans « Jazz » : non ré-ajouté, retiré des favoris/);
   assert.match(dash, /Titres triés \(total\)[\s\S]*?>5</);
+
+  // Mode « conserver les favoris » + tous les favoris analysés
+  await submit("/", "Enregistrer", { cronExpression: "0 * * * *", scanLimit: "0" });
+  assert.match(await page("/"), /favoris conservés/);
+  state.added.p1 = []; // t1 retiré de la playlist à la main…
+  state.favorites = ["t9", "t1", ...state.favorites]; // … puis re-liké ; t9 est un nouveau like
+  await submit("/", "Synchronisation réelle");
+  await waitIdle();
+  dash = await page("/");
+  assert.match(dash, /analysé\(s\) \(tous\)/);
+  assert.match(dash, /1 titre\(s\) déjà classé\(s\) : non ré-ajouté\(s\)</);
+  assert.match(dash, /Song Nine → « Rock » via rock \(artist tag\) \(reste en favori\)/);
+  assert.deepEqual(state.added.p1, ["t9"]); // t1 ne revient pas
+  assert.deepEqual(state.favorites, ["t9", "t1", "t3", "t4", "t5"]); // rien n'est retiré des favoris
+  await submit("/", "Synchronisation réelle"); // 2e passage : rien de nouveau
+  await waitIdle();
+  assert.deepEqual(state.added.p1, ["t9"]);
+  assert.match(await page("/"), /2 titre\(s\) déjà classé\(s\)/);
 
   // Genres détectés proposés au mapping
   const pl3 = await page("/playlists");

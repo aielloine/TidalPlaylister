@@ -14,6 +14,19 @@ Trie automatiquement les titres likés sur Tidal vers des playlists selon leur g
 4. **Doublons** (même ISRC, ou même artiste + titre normalisé) : un seul exemplaire est ajouté à la playlist, tous
    sortent des favoris.
 
+## Favoris : retirer ou conserver
+Réglage « Retirer des favoris après classement » sur le dashboard :
+- **activé** (défaut) : le titre est déplacé (ajouté à la playlist puis retiré des favoris) ;
+- **désactivé** : le titre est copié dans la playlist et reste liké.
+
+Dans les deux cas :
+- un titre (ou un de ses doublons) **déjà présent** dans la playlist n'y est pas ré-ajouté ;
+- un titre classé est mémorisé : s'il est ensuite **retiré de la playlist à la main**, il n'y revient jamais (même
+  re-liké, ou si son mapping change). En mode « retirer », un titre déjà classé encore en favori en est retiré.
+
+« Favoris analysés par passage » : les N favoris les plus récents (300 par défaut), **identique en dry run et en
+réel** ; 0 = tous. Les titres déjà classés ne sont pas ré-analysés, donc « tous » reste rapide après le 1er passage.
+
 Sur `/playlists`, des **playlists d'ambiance** prêtes à l'emploi (Rap FR, Électro chill, Indie / folk calme,
 Dance / festival, Pop / tubes) créent la playlist et mappent d'un coup les tags Last.fm correspondants.
 
