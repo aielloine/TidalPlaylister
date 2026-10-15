@@ -165,10 +165,16 @@ export async function addToPlaylist(playlistId: string, trackIds: string[]) {
     });
 }
 
+export async function getPlaylistTrackIds(playlistId: string) {
+  const data = await all(`/playlists/${playlistId}/relationships/items?countryCode=${await country()}`);
+  return new Set(data.filter((d) => d.type === "tracks").map((d) => d.id));
+}
+
 // ---------- Favoris ----------
 
+// limit = 0 : tous les favoris.
 export async function getFavoriteTrackIds(limit: number) {
-  const data = await all(`/userCollectionTracks/me/relationships/items?sort=-addedAt`, limit);
+  const data = await all(`/userCollectionTracks/me/relationships/items?sort=-addedAt`, limit || Infinity);
   return data.filter((d) => d.type === "tracks").map((d) => d.id);
 }
 
