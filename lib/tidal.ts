@@ -175,7 +175,8 @@ export async function getPlaylistTrackIds(playlistId: string) {
 // limit = 0 : tous les favoris.
 export async function getFavoriteTrackIds(limit: number) {
   const data = await all(`/userCollectionTracks/me/relationships/items?sort=-addedAt`, limit || Infinity);
-  return data.filter((d) => d.type === "tracks").map((d) => d.id);
+  // Tidal peut renvoyer un même titre deux fois (chevauchement de pages) : dédoublonné, ordre conservé.
+  return [...new Set(data.filter((d) => d.type === "tracks").map((d) => d.id))];
 }
 
 export async function removeFavorites(trackIds: string[]) {
