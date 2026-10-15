@@ -40,11 +40,16 @@ export async function saveSettings(f: FormData) {
   await requireUser();
   const cronExpression = str(f, "cronExpression");
   if (!cron.validate(cronExpression)) redirect(`/?error=${encodeURIComponent(`Expression cron invalide : ${cronExpression}`)}`);
-  await prisma.settings.upsert({
-    where: { id: 1 },
-    update: { cronExpression, cronEnabled: f.get("cronEnabled") === "on", dryRun: f.get("dryRun") === "on" },
-    create: { cronExpression, cronEnabled: f.get("cronEnabled") === "on", dryRun: f.get("dryRun") === "on" },
-  });
+  const scanLimit = Number(str(f, "scanLimit") || 300);
+  if (!Number.isInteger(scanLimit) || scanLimit < 0) redirect(`/?error=${encodeURIComponent("Nombre de favoris analysés : entier ≥ 0 attendu")}`);
+  const data = {
+    cronExpression,
+    cronEnabled: f.get("cronEnabled") === "on",
+    dryRun: f.get("dryRun") === "on",
+    removeFromFavorites: f.get("removeFromFavorites") === "on",
+    scanLimit,
+  };
+  await prisma.settings.upsert({ where: { id: 1 }, update: data, create: data });
   await startScheduler();
   revalidatePath("/");
 }

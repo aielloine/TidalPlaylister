@@ -33,6 +33,16 @@ model Settings {
   cronEnabled    Boolean @default(true)
   dryRun         Boolean @default(true) // appliqué au cron ; le déclenchement manuel choisit le sien
   ignoredGenres  String  @default("films/jeux vidéo,musiques de films,seen live,favorites,favourites") // séparés par des virgules
+  removeFromFavorites Boolean @default(true) // false : le titre est copié dans la playlist et reste liké
+  scanLimit      Int     @default(300) // nombre de favoris récents analysés par passage ; 0 = tous
+}
+
+// Titres déjà classés (ajoutés à une playlist, ou trouvés déjà dedans) : jamais ré-ajoutés, même s'ils ont
+// été retirés de la playlist à la main ensuite.
+model ProcessedTrack {
+  trackId    String   @id
+  playlistId String
+  createdAt  DateTime @default(now())
 }
 
 // Un genre (ou tag Last.fm) -> une playlist. Plusieurs genres peuvent pointer vers la même playlist.
