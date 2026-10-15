@@ -269,7 +269,7 @@ try {
   await submit("/", "Enregistrer", { cronExpression: "0 * * * *", scanLimit: "0" });
   assert.match(await page("/"), /favoris conservés/);
   state.added.p1 = []; // t1 retiré de la playlist à la main…
-  state.favorites = ["t9", "t1", ...state.favorites]; // … puis re-liké ; t9 est un nouveau like
+  state.favorites = ["t9", "t1", ...state.favorites, "t9"]; // … puis re-liké ; t9 est un nouveau like (renvoyé 2 fois par Tidal)
   await submit("/", "Synchronisation réelle");
   await waitIdle();
   dash = await page("/");
@@ -277,7 +277,8 @@ try {
   assert.match(dash, /1 titre\(s\) déjà classé\(s\) : non ré-ajouté\(s\)</);
   assert.match(dash, /Song Nine → « Rock » via rock \(artist tag\) \(reste en favori\)/);
   assert.deepEqual(state.added.p1, ["t9"]); // t1 ne revient pas
-  assert.deepEqual(state.favorites, ["t9", "t1", "t3", "t4", "t5"]); // rien n'est retiré des favoris
+  assert.deepEqual(state.favorites, ["t9", "t1", "t3", "t4", "t5", "t9"]); // rien n'est retiré des favoris
+  assert.doesNotMatch(dash, /Échec/);
   await submit("/", "Synchronisation réelle"); // 2e passage : rien de nouveau
   await waitIdle();
   assert.deepEqual(state.added.p1, ["t9"]);
