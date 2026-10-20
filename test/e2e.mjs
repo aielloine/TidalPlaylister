@@ -215,17 +215,17 @@ try {
   auth = new URL((await http("/api/tidal/login")).headers.get("location")); // cookie supprimé par l'échec
   const cb = await http(`/api/tidal/callback?code=x&state=${auth.searchParams.get("state")}`);
   assert.match(cb.headers.get("location"), /tidal=ok/);
-  assert.match(await page("/"), /Connecté \(utilisateur u1\)/);
+  assert.match(await page("/"), />Connecté<[\s\S]*?Utilisateur [\s\S]*?u1</);
 
   // Playlists (pagination) + création + mappings
   const pl = await page("/playlists");
   assert.ok(pl.includes(">Rock<") && pl.includes(">Jazz<"), "playlists des 2 pages affichées");
   await submit("/playlists", "Créer", { name: "Nouvelle" });
   assert.deepEqual(state.created, ["Nouvelle"]);
-  await submit("/playlists", "p1", { genres: "Rock" });
-  await submit("/playlists", "p2", { genres: "jazz, Blues" });
-  await submit("/playlists", "p1", { genres: "Rap/Hip Hop" }); // générique : priorité auto 0
-  await submit("/playlists", "p2", { genres: "rap français" }); // spécifique : priorité auto 10
+  await submit("/playlists", "Ajouter des genres à Rock", { genres: "Rock" });
+  await submit("/playlists", "Ajouter des genres à Jazz", { genres: "jazz, Blues" });
+  await submit("/playlists", "Ajouter des genres à Rock", { genres: "Rap/Hip Hop" }); // générique : priorité auto 0
+  await submit("/playlists", "Ajouter des genres à Jazz", { genres: "rap français" }); // spécifique : priorité auto 10
   await submit("/playlists", "Indie / folk calme"); // ambiance : crée la playlist p9 + tags
   assert.deepEqual(state.created, ["Nouvelle", "Indie / folk calme"]);
   const pl2 = await page("/playlists");
@@ -263,13 +263,13 @@ try {
   assert.deepEqual(state.favorites, ["t3", "t4", "t5"]); // mais retirés des favoris
   dash = await page("/");
   assert.match(dash, /Song Six — déjà dans « Jazz » : non ré-ajouté, retiré des favoris/);
-  assert.match(dash, /Titres triés \(total\)[\s\S]*?>5</);
+  assert.match(dash, /Titres triés<[\s\S]*?>5</);
 
   // Mode « conserver les favoris » + tous les favoris analysés
   await submit("/", "Enregistrer", { cronExpression: "0 * * * *", scanLimit: "0" });
-  assert.match(await page("/"), /favoris conservés/);
+  assert.match(await page("/"), /Favoris conservés/);
   state.added.p1 = []; // t1 retiré de la playlist à la main…
-  state.favorites = ["t9", "t1", ...state.favorites]; // … puis re-liké ; t9 est un nouveau like
+  state.favorites = ["t9", "t1", ...state.favorites, "t9"]; // … puis re-liké ; t9 est un nouveau like (renvoyé 2 fois par Tidal)
   await submit("/", "Synchronisation réelle");
   await waitIdle();
   dash = await page("/");
@@ -277,7 +277,8 @@ try {
   assert.match(dash, /1 titre\(s\) déjà classé\(s\) : non ré-ajouté\(s\)</);
   assert.match(dash, /Song Nine → « Rock » via rock \(artist tag\) \(reste en favori\)/);
   assert.deepEqual(state.added.p1, ["t9"]); // t1 ne revient pas
-  assert.deepEqual(state.favorites, ["t9", "t1", "t3", "t4", "t5"]); // rien n'est retiré des favoris
+  assert.deepEqual(state.favorites, ["t9", "t1", "t3", "t4", "t5", "t9"]); // rien n'est retiré des favoris
+  assert.doesNotMatch(dash, /Échec/);
   await submit("/", "Synchronisation réelle"); // 2e passage : rien de nouveau
   await waitIdle();
   assert.deepEqual(state.added.p1, ["t9"]);
@@ -290,12 +291,22 @@ try {
   assert.ok(unmappedCard.includes("artist tag") && !unmappedCard.includes("musiques de films"), "genres ignorés masqués");
   assert.equal(state.deezerIsrcs.filter((i) => i === "ISRC5").length, 1); // cache : pas de 2e appel au 2e passage
 
+  // Idées de playlists pour les favoris non classés (t3, t4, t5) : genre fréquent hors catalogue, puis catalogue
+  assert.match(pl3, /Idées de playlists[\s\S]*?3 favoris attendent une playlist/);
+  assert.match(pl3, /Artist Tag[\s\S]*?3 favoris/);
+  assert.match(pl3, /Reggae \/ dancehall/);
+  await submit("/playlists", "Tout créer");
+  assert.deepEqual(state.created.slice(2), ["Artist Tag", "Électro chill", "Reggae / dancehall"]);
+  const pl4 = await page("/playlists");
+  assert.doesNotMatch(pl4, /Idées de playlists/); // tous leurs tags sont maintenant mappés
+  assert.doesNotMatch(pl4.slice(pl4.indexOf("Genres détectés non mappés"), pl4.indexOf("Playlists d")), /artist tag/);
+
   // Planification
   assert.match((await submit("/", "Enregistrer", { cronExpression: "pas un cron", cronEnabled: "on" })).headers.get("location") ?? "", /error=/);
   await submit("/", "Enregistrer", { cronExpression: "0 3 * * *", cronEnabled: "on" });
   dash = await page("/");
-  assert.match(dash, /0 3 \* \* \* · réel/);
-  assert.match(dash, /\d{2}\/\d{2}\/\d{4} 03:00:00/); // prochaine exécution à 3 h
+  assert.match(dash, />0 3 \* \* \*<[\s\S]*?>Réel</);
+  assert.match(dash, /, 03:00</); // prochaine exécution à 3 h
 
   console.log("\n✅ e2e OK");
 } finally {
