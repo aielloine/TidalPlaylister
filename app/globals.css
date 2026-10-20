@@ -1,3 +1,58 @@
 /* MUI dans sa propre couche : les utilitaires Tailwind gardent la priorité. */
 @layer theme, base, mui, components, utilities;
 @import "tailwindcss";
+
+/* Identité « l'onde triée » : mêmes valeurs que components/Providers.tsx (thème MUI). */
+@theme {
+  --color-night: #0b0d10; /* fond */
+  --color-stage: #14171c; /* cartes */
+  --color-raised: #171a20; /* lignes dans une carte */
+  --color-hollow: #0f1216; /* champs */
+  --color-well: #101317; /* zone de logs */
+  --color-edge: #20242c; /* bordure de carte */
+  --color-line: #262b34; /* bordure de champ, séparateurs */
+  --color-tag: #1d2129; /* chip neutre */
+  --color-ink: #eef1f5; /* texte */
+  --color-soft: #c4cad4; /* texte doux */
+  --color-dim: #a3abb8;
+  --color-muted: #8b93a1; /* secondaire */
+  --color-faint: #7d8594; /* discret, ≥ 4,5:1 */
+  --color-aqua: #2ee6d6; /* réel, accent */
+  --color-aqua-ink: #04201d; /* texte sur aqua */
+  --color-lilac: #a69bff; /* simulation */
+  --color-lilac-soft: #c3baff;
+  --color-ok: #4ade80;
+  --color-amber: #f5b544; /* ignoré */
+  --color-coral: #ff6b6b; /* erreur */
+
+  --font-display: "Bricolage Grotesque", "Geist", system-ui, sans-serif;
+  --font-sans: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, monospace;
+}
+
+body {
+  background:
+    radial-gradient(900px 420px at 8% -8%, rgba(46, 230, 214, 0.07), transparent 70%),
+    radial-gradient(800px 380px at 96% 0%, rgba(166, 155, 255, 0.06), transparent 70%),
+    var(--color-night);
+  background-repeat: no-repeat;
+  min-height: 100vh;
+}
+
+/* Barres d'égaliseur : animées pendant une synchro. */
+@keyframes tp-wave {
+  0%, 100% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1); }
+}
+@keyframes tp-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.tp-wave { animation: tp-wave 1.2s ease-in-out infinite; transform-origin: center; }
+.tp-eq { animation: tp-wave 0.9s ease-in-out infinite; transform-origin: bottom; }
+.tp-pulse { animation: tp-pulse 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .tp-wave, .tp-eq, .tp-pulse { animation: none; }
+}
+.tp-scroll::-webkit-scrollbar { width: 12px; }
+.tp-scroll::-webkit-scrollbar-thumb { background: #262b34; border-radius: 999px; border: 3px solid #101317; }

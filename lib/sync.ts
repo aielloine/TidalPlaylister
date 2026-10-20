@@ -54,12 +54,14 @@ export async function runSync({ dryRun, trigger }: { dryRun: boolean; trigger: "
     // tous sortent des favoris (mode « retirer »). Le premier est le favori le plus récent.
     type Entry = { main: Track; dups: Track[]; genre: string };
     const byPlaylist = new Map<string, { name: string; entries: Entry[] }>();
+    const unsorted: { trackId: string; label: string; genres: string }[] = [];
     for (const [main, ...dups] of groupDuplicates(tracks)) {
       const genres = [...new Set([main, ...dups].flatMap((t) => t.genres))];
       const dupNote = dups.length ? ` (+ ${dups.length} doublon(s))` : "";
       const pick = pickMapping(genres, mappings);
       if (!pick) {
         counts.skipped += 1 + dups.length;
+        unsorted.push({ trackId: main.id, label: main.label, genres: JSON.stringify(genres) });
         await log(
           "skipped",
           `${main.label}${dupNote} — ${genres.length ? `genre non mappé (${genres.join(", ")})` : "aucun genre"} : reste en favori`,
@@ -76,7 +78,7 @@ export async function runSync({ dryRun, trigger }: { dryRun: boolean; trigger: "
     const prefix = dryRun ? "[DRY RUN] " : "";
     const favNote = keep ? " (reste en favori)" : "";
     for (const [playlistId, { name, entries }] of byPlaylist) {
-      const allIds = entries.flatMap((e) => [e.main.id, ...e.dups.map((d) => d.id)]);
+      const allIds = [...new Set(entries.flatMap((e) => [e.main.id, ...e.dups.map((d) => d.id)]))];
       try {
         // Jamais de doublon dans la playlist : on saute les titres (ou un de leurs doublons) déjà présents.
         const present = await getPlaylistTrackIds(playlistId);
@@ -84,7 +86,9 @@ export async function runSync({ dryRun, trigger }: { dryRun: boolean; trigger: "
         const toAdd = entries.filter((e) => !isPresent(e));
         if (!dryRun) {
           await addToPlaylist(playlistId, toAdd.map((e) => e.main.id));
-          await prisma.processedTrack.createMany({ data: allIds.map((trackId) => ({ trackId, playlistId })) });
+          // upsert un par un : robuste aux doublons d'ID et aux enregistrements d'un passage interrompu.
+          for (const trackId of allIds)
+            await prisma.processedTrack.upsert({ where: { trackId }, update: {}, create: { trackId, playlistId } });
           // Retrait des favoris seulement après un ajout réussi : en cas d'erreur, le titre reste en favori.
           if (!keep) await removeFavorites(allIds);
         }
@@ -106,6 +110,9 @@ export async function runSync({ dryRun, trigger }: { dryRun: boolean; trigger: "
         await log("error", `Échec pour « ${name} » (${allIds.length} titre(s)) : ${(e as Error).message}`);
       }
     }
+
+    // Suggestions de playlists : favoris restés non classés à ce passage (dry run compris).
+    await prisma.$transaction([prisma.unsortedTrack.deleteMany(), prisma.unsortedTrack.createMany({ data: unsorted })]);
 
     await log("info", `Terminé : ${counts.moved} classé(s), ${counts.skipped} ignoré(s), ${counts.failed} en échec`);
     return await prisma.syncRun.update({

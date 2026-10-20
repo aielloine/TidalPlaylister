@@ -45,6 +45,14 @@ model ProcessedTrack {
   createdAt  DateTime @default(now())
 }
 
+// Favoris restés non classés au dernier passage (dry run compris), avec leurs genres : alimente les
+// suggestions de playlists. Remplacé intégralement à chaque synchro terminée.
+model UnsortedTrack {
+  trackId String @id
+  label   String
+  genres  String // tableau JSON de genres normalisés
+}
+
 // Un genre (ou tag Last.fm) -> une playlist. Plusieurs genres peuvent pointer vers la même playlist.
 // Quand un titre a plusieurs genres mappés, le plus prioritaire gagne (spécifique avant générique).
 model Mapping {
