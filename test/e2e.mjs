@@ -28,6 +28,7 @@ const lastfmTracks = {
   "Song Eight": [{ name: "Indie Folk", count: 100 }, { name: "seen live", count: 90 }, { name: "mellow", count: 10 }],
 };
 const lastfmCalls = [];
+const drops = { tracks: 1, deezer: 1 }; // coupures réseau simulées (socket fermée sans réponse)
 const state = { favorites: ["t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8"], added: {}, manual: {}, created: [], deezerIsrcs: [] };
 
 const fake = createServer(async (req, res) => {
@@ -38,6 +39,8 @@ const fake = createServer(async (req, res) => {
   const p = url.pathname;
   const ids = url.searchParams.getAll("filter[id]");
   const genreRes = (gs) => gs.map((id) => ({ id, type: "genres", attributes: { genreName: genres[id] } }));
+
+  if ((p === "/v2/tracks" && drops.tracks-- > 0) || (p.startsWith("/deezer/track/") && drops.deezer-- > 0)) return req.socket.destroy();
 
   // Faux Deezer
   if (p.startsWith("/deezer/track/isrc:")) {
@@ -131,6 +134,7 @@ const env = {
   LASTFM_API_KEY: "lfm",
   PORT: "3999",
   HOSTNAME: "127.0.0.1",
+  HTTP_RETRY_DELAYS_MS: "50,50",
 };
 execFileSync("node", ["migrate.mjs"], { env, stdio: "inherit" });
 const app = spawn("node", [".next/standalone/server.js"], { env, stdio: "inherit" });
@@ -254,6 +258,7 @@ try {
   assert.equal(lastfmCalls.filter((c) => c === "artist.gettoptags:Artist").length, 1); // cache artiste
   assert.deepEqual(state.added, {});
   assert.equal(state.favorites.length, 8);
+  assert.ok(drops.tracks < 0 && drops.deezer < 0, "coupures réseau simulées"); // et rattrapées : la synchro ci-dessus a abouti
 
   // Réel (t6 a été ajouté à la main dans « Jazz » entre-temps)
   state.manual.p2 = ["t6"];
