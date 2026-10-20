@@ -27,8 +27,14 @@ Dans les deux cas :
 « Favoris analysés par passage » : les N favoris les plus récents (300 par défaut), **identique en dry run et en
 réel** ; 0 = tous. Les titres déjà classés ne sont pas ré-analysés, donc « tous » reste rapide après le 1er passage.
 
-Sur `/playlists`, des **playlists d'ambiance** prêtes à l'emploi (Rap FR, Électro chill, Indie / folk calme,
-Dance / festival, Pop / tubes) créent la playlist et mappent d'un coup les tags Last.fm correspondants.
+Sur `/playlists` :
+- **Idées de playlists** : après chaque synchro (dry run compris), les favoris restés non classés sont analysés et
+  l'appli propose les playlists qui en rangeraient le plus — idées du catalogue (Hip-hop US, Reggae / dancehall,
+  Metal, Tekno / free party…) ou playlist au nom d'un genre fréquent. Un clic (ou « Tout créer ») crée la playlist
+  sur Tidal et mappe ses tags ; les titres sont rangés à la synchro suivante.
+- **Playlists d'ambiance** : le catalogue complet (22 idées, `lib/moods.ts`), chacune crée la playlist et mappe d'un
+  coup les tags Last.fm correspondants.
+- Un clic sur un **genre détecté non mappé** permet de l'associer à une playlist ou de l'ignorer.
 
 ## Prérequis Tidal
 1. Créer une app sur https://developer.tidal.com/dashboard
