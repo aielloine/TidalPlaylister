@@ -9,5 +9,5 @@ export async function proxy(req: NextRequest) {
 
 // Tout est protégé sauf login, setup, l'API next-auth et les assets.
 export const config = {
-  matcher: ["/((?!login|setup|api/auth|_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!login|setup|api/auth|_next/static|_next/image|favicon.ico|icon.svg).*)"],
 };

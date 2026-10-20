@@ -5,8 +5,9 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { hashPassword, requireUser } from "@/lib/auth";
 import { getSettings, prisma } from "@/lib/db";
-import { defaultPriority, parseList } from "@/lib/genres";
-import { MOODS } from "@/lib/moods";
+import { defaultPriority, normGenre, parseList } from "@/lib/genres";
+import { MOODS, moodTags } from "@/lib/moods";
+import { titleCase } from "@/lib/suggestions";
 import { startScheduler } from "@/lib/scheduler";
 import { isSyncRunning, runSync } from "@/lib/sync";
 import * as tidal from "@/lib/tidal";
@@ -102,17 +103,75 @@ export async function saveIgnoredGenres(f: FormData) {
   revalidatePath("/playlists");
 }
 
-// Crée (ou réutilise, par nom) la playlist d'ambiance et y mappe ses tags encore libres.
+// Crée (ou réutilise, par nom) une playlist et y mappe les genres encore libres.
+async function createAndMap(name: string, wanted: [string, number][], existing?: tidal.Playlist[]) {
+  const found = (existing ?? (await tidal.getPlaylists())).find((p) => p.name.toLowerCase() === name.toLowerCase());
+  const playlistId = found?.id ?? (await tidal.createPlaylist(name));
+  const playlistName = found?.name ?? name;
+  const taken = new Set((await prisma.mapping.findMany({ select: { genre: true } })).map((m) => m.genre));
+  for (const [genre, priority] of wanted)
+    if (!taken.has(genre) && taken.add(genre)) await prisma.mapping.create({ data: { genre, priority, playlistId, playlistName } });
+  if (!found) existing?.push({ id: playlistId, name, tracks: 0 });
+}
+
+// Clé d'idée : "mood:<index>" (catalogue) ou "genre:<nom>" (playlist au nom d'un genre détecté).
+function idea(key: string): [string, [string, number][]] | null {
+  if (key.startsWith("mood:")) {
+    const mood = MOODS[Number(key.slice(5))];
+    return mood ? [mood.name, moodTags(mood)] : null;
+  }
+  if (key.startsWith("genre:")) {
+    const genre = normGenre(key.slice(6));
+    return genre ? [titleCase(genre), [[genre, defaultPriority(genre)]]] : null;
+  }
+  return null;
+}
+
 export async function applyMood(index: number) {
   await requireUser();
-  const mood = MOODS[index];
-  if (!mood) return;
-  const existing = (await tidal.getPlaylists()).find((p) => p.name.toLowerCase() === mood.name.toLowerCase());
-  const playlistId = existing?.id ?? (await tidal.createPlaylist(mood.name));
-  const taken = new Set((await prisma.mapping.findMany({ select: { genre: true } })).map((m) => m.genre));
-  const wanted: [string, number][] = [...mood.tags.map((t): [string, number] => [t, mood.priority]), ...(mood.generic ?? []).map((t): [string, number] => [t, 1])];
-  for (const [genre, priority] of wanted)
-    if (!taken.has(genre) && taken.add(genre)) await prisma.mapping.create({ data: { genre, priority, playlistId, playlistName: existing?.name ?? mood.name } });
+  const i = idea(`mood:${index}`);
+  if (i) await createAndMap(...i);
+  revalidatePath("/playlists");
+}
+
+export async function applySuggestion(key: string) {
+  await requireUser();
+  const i = idea(key);
+  if (i) await createAndMap(...i);
+  revalidatePath("/playlists");
+}
+
+// « Tout créer » : un seul aller-retour pour lister les playlists existantes.
+export async function applySuggestions(f: FormData) {
+  await requireUser();
+  const playlists = await tidal.getPlaylists();
+  for (const key of f.getAll("key").map(String)) {
+    const i = idea(key);
+    if (i) await createAndMap(i[0], i[1], playlists);
+  }
+  revalidatePath("/playlists");
+}
+
+// Depuis un chip « genre non mappé » : l'associe à une playlist existante.
+export async function assignGenre(f: FormData) {
+  await requireUser();
+  const genre = normGenre(str(f, "genre"));
+  const playlistId = str(f, "playlistId");
+  if (!genre || !playlistId) return;
+  const p = priorityOf(f) ?? defaultPriority(genre);
+  const playlistName = str(f, "playlistName");
+  await prisma.mapping.upsert({
+    where: { genre },
+    update: { playlistId, playlistName, priority: p },
+    create: { genre, playlistId, playlistName, priority: p },
+  });
+  revalidatePath("/playlists");
+}
+
+export async function ignoreGenre(genre: string) {
+  await requireUser();
+  const { ignoredGenres } = await getSettings();
+  await prisma.settings.update({ where: { id: 1 }, data: { ignoredGenres: parseList(`${ignoredGenres},${genre}`).join(",") } });
   revalidatePath("/playlists");
 }
 

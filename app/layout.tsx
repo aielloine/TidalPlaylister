@@ -5,10 +5,19 @@ import "./globals.css";
 
 export const metadata: Metadata = { title: "Tidal Playlister" };
 
+const FONTS =
+  "https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap";
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="fr">
-      <body>
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
+        {/* eslint-disable-next-line @next/next/no-page-custom-font -- chargé une fois pour toute l'app */}
+        <link rel="stylesheet" href={FONTS} />
+      </head>
+      <body className="font-sans text-ink antialiased">
         <Providers>
           <Nav />
           {children}

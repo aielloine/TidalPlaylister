@@ -1,9 +1,10 @@
 "use client";
 
-import { Alert, Button, TextField } from "@mui/material";
+import { Alert, Button } from "@mui/material";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import AuthField from "@/components/AuthField";
 
 export default function LoginForm() {
   const router = useRouter();
@@ -23,11 +24,11 @@ export default function LoginForm() {
   }
 
   return (
-    <form action={submit} className="flex flex-col gap-4">
+    <form action={submit} className="flex flex-col gap-5">
       {error && <Alert severity="error">{error}</Alert>}
-      <TextField name="username" label="Utilisateur" autoComplete="username" required autoFocus />
-      <TextField name="password" label="Mot de passe" type="password" autoComplete="current-password" required />
-      <Button type="submit" variant="contained" disabled={pending}>
+      <AuthField id="username" label="Utilisateur" autoComplete="username" required autoFocus />
+      <AuthField id="password" label="Mot de passe" type="password" autoComplete="current-password" required />
+      <Button type="submit" variant="contained" size="large" disabled={pending} sx={{ mt: 0.5, minHeight: 52 }}>
         Se connecter
       </Button>
     </form>
