@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { prisma } from "./db";
 import { deezerGenres } from "./deezer";
+import { fetchRetry } from "./http";
 import { usable } from "./genres";
 import { lastfmTags } from "./lastfm";
 
@@ -36,11 +37,11 @@ export function startAuthorization() {
 type TokenResponse = { access_token: string; refresh_token?: string; expires_in: number; scope?: string };
 
 async function requestToken(params: Record<string, string>): Promise<TokenResponse> {
-  const res = await fetch(TOKEN_URL, {
+  const res = await fetchRetry(TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ client_id: clientId(), ...params }),
-  });
+  }, "Tidal");
   if (!res.ok) throw new Error(`Token Tidal refusé (${res.status}): ${await res.text()}`);
   return res.json();
 }
@@ -92,10 +93,11 @@ async function accessToken() {
 // ---------- HTTP ----------
 
 async function rawFetch(path: string, token: string, init: RequestInit = {}, attempt = 0): Promise<Response> {
-  const res = await fetch(path.startsWith("http") ? path : API + path, {
-    ...init,
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/vnd.api+json", ...init.headers },
-  });
+  const res = await fetchRetry(
+    path.startsWith("http") ? path : API + path,
+    { ...init, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/vnd.api+json", ...init.headers } },
+    "Tidal",
+  );
   if (res.status === 429 && attempt < 5) {
     const wait = Number(res.headers.get("Retry-After")) || 2 ** attempt;
     await new Promise((r) => setTimeout(r, wait * 1000));
@@ -190,10 +192,18 @@ export async function removeFavorites(trackIds: string[]) {
 // ---------- Genres ----------
 
 // Liste officielle des genres Tidal (l'API n'expose pas d'autre moyen de tous les lister).
+// Mis en cache 6 h : appelé à chaque affichage de /playlists, et la liste ne bouge quasiment jamais.
+const GENRES_TTL = 6 * 3600_000;
+const genreCache = globalThis as unknown as { tidalGenres?: { at: number; list: string[] } };
 export async function getTidalGenres() {
+  const c = genreCache.tidalGenres;
+  if (c && Date.now() - c.at < GENRES_TTL) return c.list;
   const data = await all(`/genres?filter[id]=USER_SELECTABLE&locale=en-US`);
-  if (!data.length) console.warn("[tidal] /genres?filter[id]=USER_SELECTABLE a renvoyé 0 genre");
-  return data.map((g) => String(g.attributes?.genreName ?? "").trim().toLowerCase()).filter(Boolean);
+  // Sans gravité : l'autocomplétion se rabat sur les genres Deezer et ceux vus sur vos titres.
+  if (!data.length) console.warn("[tidal] /genres?filter[id]=USER_SELECTABLE a renvoyé 0 genre (prochain essai dans 6 h)");
+  const list = data.map((g) => String(g.attributes?.genreName ?? "").trim().toLowerCase()).filter(Boolean);
+  genreCache.tidalGenres = { at: Date.now(), list };
+  return list;
 }
 
 export type TrackInfo = { id: string; label: string; artist: string; title: string; isrc?: string; genres: string[] };
