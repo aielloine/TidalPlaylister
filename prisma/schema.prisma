@@ -35,6 +35,7 @@ model Settings {
   ignoredGenres  String  @default("films/jeux vidéo,musiques de films,seen live,favorites,favourites") // séparés par des virgules
   removeFromFavorites Boolean @default(true) // false : le titre est copié dans la playlist et reste liké
   scanLimit      Int     @default(300) // nombre de favoris récents analysés par passage ; 0 = tous
+  pruneMismatched Boolean @default(true) // un titre classé qui ne correspond plus à sa playlist en est retiré
 }
 
 // Titres déjà classés (ajoutés à une playlist, ou trouvés déjà dedans) : jamais ré-ajoutés, même s'ils ont
@@ -43,6 +44,17 @@ model ProcessedTrack {
   trackId    String   @id
   playlistId String
   createdAt  DateTime @default(now())
+  label      String? // « Artiste — Titre », pour les logs
+  genres     String? // tableau JSON des genres au moment du classement : permet de ré-évaluer sans tout re-télécharger
+  byApp      Boolean  @default(true) // false : trouvé déjà dans la playlist, ou retiré à la main depuis ; on n'y touche plus
+}
+
+// Pochette générée appliquée à une playlist Tidal.
+model PlaylistCover {
+  playlistId String   @id
+  artworkId  String
+  name       String // nom de la playlist au moment de la génération : une pochette périmée est signalée
+  appliedAt  DateTime @default(now())
 }
 
 // Favoris restés non classés au dernier passage (dry run compris), avec leurs genres : alimente les
