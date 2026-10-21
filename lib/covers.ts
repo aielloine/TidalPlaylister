@@ -1,6 +1,6 @@
 import { MOODS } from "./moods";
 
-// Pochettes générées : dégradé dérivé du nom de la playlist (couleurs du catalogue si le nom y figure).
+// Pochettes générées : dégradé de la famille de genres (couleurs du catalogue si le nom y figure, sinon dérivé du nom).
 const PALETTE: [string, string][] = [
   ["#2ee6d6", "#4f7cff"],
   ["#ff8a5b", "#ff4f7a"],
@@ -12,6 +12,7 @@ const PALETTE: [string, string][] = [
   ["#ff5fd2", "#6b4bff"],
   ["#4ade80", "#0ea5e9"],
   ["#fda4af", "#e11d48"],
+  ["#2a1650", "#c2389e"], // sombre (synthwave) : encre claire sur la pochette
 ];
 
 export function coverColors(name: string): [string, string] {
@@ -24,5 +25,5 @@ export function coverColors(name: string): [string, string] {
 
 export const coverGradient = (name: string) => {
   const [a, b] = coverColors(name);
-  return `linear-gradient(140deg, ${a}, ${b})`;
+  return `linear-gradient(150deg, ${a}, ${b})`;
 };

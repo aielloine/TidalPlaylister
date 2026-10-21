@@ -2,10 +2,10 @@
 
 import { Popover } from "@mui/material";
 import { useState } from "react";
-import { Cover, Icon } from "@/components/ui";
+import { Cover, Icon, PlainCover } from "@/components/ui";
 
 type Genre = { name: string; count: number };
-type Playlist = { id: string; name: string; tracks: number };
+type Playlist = { id: string; name: string; tracks: number; sub: string | null }; // sub null : playlist non gérée
 
 // Chips des genres rencontrés et non mappés : un clic propose de les associer à une playlist ou de les ignorer.
 export default function UnmappedGenres({
@@ -73,7 +73,7 @@ export default function UnmappedGenres({
                     type="submit"
                     className="flex min-h-11 w-full cursor-pointer items-center gap-2.5 rounded-[10px] border-0 bg-transparent px-2 text-left text-sm text-ink hover:bg-[#262b34]"
                   >
-                    <Cover name={p.name} size={28} />
+                    {p.sub === null ? <PlainCover size={28} /> : <Cover name={p.name} sub={p.sub} size={28} />}
                     <span className="flex-1 truncate">{p.name}</span>
                     <span className="text-xs text-muted">{p.tracks} titre{p.tracks > 1 ? "s" : ""}</span>
                   </button>

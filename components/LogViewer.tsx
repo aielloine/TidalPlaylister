@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { coverGradient } from "@/lib/covers";
-import { Icon } from "@/components/ui";
+import { Cover, Icon } from "@/components/ui";
 
 export type LogLine = { id: number; time: string; level: string; message: string; trackId?: string | null };
 
@@ -61,7 +60,7 @@ const Track = ({ artist, title }: { artist: string; title: string }) => (
 
 const PlaylistChip = ({ name }: { name: string }) => (
   <span className="inline-flex h-[22px] items-center gap-1.5 rounded-md bg-tag pl-[3px] pr-2 font-medium text-ink">
-    <span className="size-4 rounded" style={{ background: coverGradient(name) }} />
+    <Cover name={name} size={16} />
     {name}
   </span>
 );
