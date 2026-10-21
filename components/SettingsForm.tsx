@@ -10,7 +10,7 @@ const PRESETS = [
   ["0 3 * * *", "Tous les jours à 3 h"],
 ];
 
-type Settings = { cronExpression: string; cronEnabled: boolean; dryRun: boolean; removeFromFavorites: boolean; scanLimit: number };
+type Settings = { cronExpression: string; cronEnabled: boolean; dryRun: boolean; removeFromFavorites: boolean; pruneMismatched: boolean; scanLimit: number };
 
 function Toggle({ name, label, help, defaultChecked, color }: { name: string; label: string; help: string; defaultChecked: boolean; color?: "secondary" }) {
   return (
@@ -93,6 +93,12 @@ export default function SettingsForm({ action, settings }: { action: (f: FormDat
           label="Retirer des favoris après classement"
           help="Sinon, le titre reste aussi dans vos favoris."
           defaultChecked={settings.removeFromFavorites}
+        />
+        <Toggle
+          name="pruneMismatched"
+          label="Ranger à nouveau les titres déjà classés"
+          help="Après un changement de genres : le titre change de playlist, ou en est retiré (et revient en favori) s'il ne correspond plus à rien."
+          defaultChecked={settings.pruneMismatched}
         />
       </div>
 

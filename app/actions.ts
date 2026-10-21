@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { hashPassword, requireUser } from "@/lib/auth";
 import { getSettings, prisma } from "@/lib/db";
 import { defaultPriority, normGenre, parseList } from "@/lib/genres";
+import { coverSub, renderCover } from "@/lib/coverImage";
 import { MOODS, moodTags } from "@/lib/moods";
 import { titleCase } from "@/lib/suggestions";
 import { startScheduler } from "@/lib/scheduler";
@@ -48,6 +49,7 @@ export async function saveSettings(f: FormData) {
     cronEnabled: f.get("cronEnabled") === "on",
     dryRun: f.get("dryRun") === "on",
     removeFromFavorites: f.get("removeFromFavorites") === "on",
+    pruneMismatched: f.get("pruneMismatched") === "on",
     scanLimit,
   };
   await prisma.settings.upsert({ where: { id: 1 }, update: data, create: data });
@@ -64,7 +66,53 @@ export async function disconnectTidal() {
 export async function createPlaylist(f: FormData) {
   await requireUser();
   const name = str(f, "name");
-  if (name) await tidal.createPlaylist(name);
+  if (name) await tryCover(await tidal.createPlaylist(name), name);
+  revalidatePath("/playlists");
+}
+
+// ---------- Pochettes générées ----------
+
+async function coverSubtitle(playlistId: string) {
+  return coverSub(await prisma.mapping.findMany({ where: { playlistId } }));
+}
+
+async function applyCoverTo(playlistId: string, name: string) {
+  const artworkId = await tidal.setPlaylistCover(playlistId, await renderCover(name, await coverSubtitle(playlistId)));
+  await prisma.playlistCover.upsert({ where: { playlistId }, update: { artworkId, name, appliedAt: new Date() }, create: { playlistId, artworkId, name } });
+}
+
+// À la création : une pochette ratée ne doit pas faire échouer la création de la playlist.
+async function tryCover(playlistId: string, name: string) {
+  await applyCoverTo(playlistId, name).catch((e) => console.warn(`[cover] « ${name} » : ${(e as Error).message}`));
+}
+
+const coverError = (e: unknown) => redirect(`/playlists?error=${encodeURIComponent(`Pochette non appliquée : ${(e as Error).message}`)}`);
+
+export async function applyCover(playlistId: string, name: string) {
+  await requireUser();
+  try {
+    await applyCoverTo(playlistId, name);
+  } catch (e) {
+    coverError(e);
+  }
+  revalidatePath("/playlists");
+}
+
+// Toutes les playlists gérées (au moins un genre mappé) sans pochette à jour.
+export async function applyAllCovers() {
+  await requireUser();
+  const [playlists, covers, mapped] = await Promise.all([
+    tidal.getPlaylists(),
+    prisma.playlistCover.findMany(),
+    prisma.mapping.findMany({ select: { playlistId: true }, distinct: ["playlistId"] }),
+  ]);
+  const managed = new Set(mapped.map((m) => m.playlistId));
+  const fresh = new Map(covers.map((c) => [c.playlistId, c.name]));
+  try {
+    for (const p of playlists) if (managed.has(p.id) && fresh.get(p.id) !== p.name) await applyCoverTo(p.id, p.name);
+  } catch (e) {
+    coverError(e);
+  }
   revalidatePath("/playlists");
 }
 
@@ -111,7 +159,10 @@ async function createAndMap(name: string, wanted: [string, number][], existing?:
   const taken = new Set((await prisma.mapping.findMany({ select: { genre: true } })).map((m) => m.genre));
   for (const [genre, priority] of wanted)
     if (!taken.has(genre) && taken.add(genre)) await prisma.mapping.create({ data: { genre, priority, playlistId, playlistName } });
-  if (!found) existing?.push({ id: playlistId, name, tracks: 0 });
+  if (!found) {
+    existing?.push({ id: playlistId, name, tracks: 0 });
+    await tryCover(playlistId, name); // nouvelle playlist : pochette générée d'office
+  }
 }
 
 // Clé d'idée : "mood:<index>" (catalogue) ou "genre:<nom>" (playlist au nom d'un genre détecté).
