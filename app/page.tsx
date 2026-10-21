@@ -61,7 +61,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   ]);
   const running = isSyncRunning();
   const next = settings.cronEnabled ? nextRun() : null;
-  const logs = (lastRun?.logs ?? []).map((l) => ({ id: l.id, time: hms(l.createdAt), level: l.level, message: l.message }));
+  const logs = (lastRun?.logs ?? []).map((l) => ({ id: l.id, time: hms(l.createdAt), level: l.level, message: l.message, trackId: l.trackId }));
   const wave = waveColors(running, lastRun?.moved ?? 0, lastRun?.skipped ?? 0, lastRun?.failed ?? 0);
 
   return (
