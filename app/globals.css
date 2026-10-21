@@ -2,7 +2,7 @@
 @layer theme, base, mui, components, utilities;
 @import "tailwindcss";
 
-/* Identité « l'onde triée » : mêmes valeurs que components/Providers.tsx (thème MUI). */
+/* Identité « Auto Playlister » : mêmes valeurs que components/Providers.tsx (thème MUI). */
 @theme {
   --color-night: #0b0d10; /* fond */
   --color-stage: #14171c; /* cartes */
@@ -51,8 +51,11 @@ body {
 .tp-wave { animation: tp-wave 1.2s ease-in-out infinite; transform-origin: center; }
 .tp-eq { animation: tp-wave 0.9s ease-in-out infinite; transform-origin: bottom; }
 .tp-pulse { animation: tp-pulse 1.4s ease-in-out infinite; }
+/* Arc Crescendo du hero pendant une synchro. */
+@keyframes tp-spin { to { transform: rotate(360deg); } }
+.tp-spin { animation: tp-spin 2.4s linear infinite; }
 @media (prefers-reduced-motion: reduce) {
-  .tp-wave, .tp-eq, .tp-pulse { animation: none; }
+  .tp-wave, .tp-eq, .tp-pulse, .tp-spin { animation: none; }
 }
 .tp-scroll::-webkit-scrollbar { width: 12px; }
 .tp-scroll::-webkit-scrollbar-thumb { background: #262b34; border-radius: 999px; border: 3px solid #101317; }

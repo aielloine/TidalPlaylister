@@ -4,7 +4,7 @@ import AutoRefresh from "@/components/AutoRefresh";
 import LogViewer from "@/components/LogViewer";
 import SettingsForm from "@/components/SettingsForm";
 import SyncButton from "@/components/SyncButton";
-import { CronChip, Icon, Mono, Overline, Pill, SectionTitle } from "@/components/ui";
+import { CronChip, Icon, Logo, Mono, Overline, Pill, SectionTitle } from "@/components/ui";
 import { getSettings, prisma } from "@/lib/db";
 import { ago, dayTime, duration, hm, hms, int, until } from "@/lib/format";
 import { nextRun } from "@/lib/scheduler";
@@ -32,20 +32,15 @@ function waveColors(running: boolean, moved: number, skipped: number, failed: nu
   });
 }
 
+// Tuile du hero : dégradé de l'identité + arc Crescendo à l'encre, qui tourne lentement pendant une synchro.
 function CoverTile({ running }: { running: boolean }) {
   return (
     <div
       aria-hidden="true"
-      className="box-border flex size-[136px] flex-none items-end gap-2 rounded-[18px] px-[26px] py-6 max-sm:size-24 max-sm:gap-1.5 max-sm:p-4"
+      className="box-border flex size-[136px] flex-none items-center justify-center rounded-[18px] max-sm:size-24"
       style={{ background: "linear-gradient(140deg, #2ee6d6 0%, #5f86ff 58%, #a69bff 100%)", boxShadow: "0 22px 44px -22px rgba(46,230,214,0.6)" }}
     >
-      {[34, 52, 70, 88].map((h, k) => (
-        <span
-          key={h}
-          className={`block w-[13px] rounded-[7px] bg-[#071a1e] opacity-[0.86] max-sm:w-2 ${running ? "tp-eq" : ""}`}
-          style={{ height: `${(h / 88) * 100}%`, maxHeight: h, animationDelay: ["-0.2s", "-0.5s", "-0.1s", "-0.7s"][k] }}
-        />
-      ))}
+      <Logo variant="ink" size={112} className={`max-sm:size-20 ${running ? "tp-spin" : ""}`} />
     </div>
   );
 }

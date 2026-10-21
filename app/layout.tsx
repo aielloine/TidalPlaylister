@@ -3,7 +3,7 @@ import Nav from "@/components/Nav";
 import Providers from "@/components/Providers";
 import "./globals.css";
 
-export const metadata: Metadata = { title: "Tidal Playlister" };
+export const metadata: Metadata = { title: "Auto Playlister", description: "Range automatiquement vos favoris Tidal dans des playlists, selon leurs genres." };
 
 const FONTS =
   "https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap";
