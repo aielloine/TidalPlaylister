@@ -49,3 +49,31 @@ export async function deezerGenreList(): Promise<string[]> {
   const d = await get("/genre");
   return ((d.data ?? []) as { id: number; name: string }[]).filter((x) => x.id !== 0).map((x) => x.name.trim().toLowerCase());
 }
+
+// Extrait de 30 s (MP3 public Deezer) : par ISRC, sinon recherche artiste + titre. Les liens expirent : cache court.
+export type Preview = { url: string; cover?: string; link?: string };
+const pg = globalThis as unknown as { deezerPreviews?: Map<string, { at: number; p: Preview | null }> };
+const previews = (pg.deezerPreviews ??= new Map());
+const PREVIEW_TTL = 10 * 60_000;
+
+const toPreview = (t: any): Preview | null => (t?.preview ? { url: t.preview, cover: t.album?.cover_medium, link: t.link } : null);
+
+export async function deezerPreview(isrc: string | undefined, artist: string, title: string): Promise<Preview | null> {
+  const key = isrc || `${artist}|${title}`;
+  const hit = previews.get(key);
+  if (hit && Date.now() - hit.at < PREVIEW_TTL) return hit.p;
+  let p: Preview | null = null;
+  if (isrc) {
+    const t = await get(`/track/isrc:${encodeURIComponent(isrc)}`);
+    if (!t.error) p = toPreview(t);
+  }
+  if (!p && title) {
+    const clean = title.replace(/\s*[([].*?[)\]]/g, ""); // « (feat. X) », « [Remastered] » gênent la recherche
+    const q = artist ? `artist:"${artist}" track:"${clean}"` : clean;
+    const r = await get(`/search?${new URLSearchParams({ q, limit: "1" })}`);
+    p = toPreview(r.data?.[0]);
+  }
+  if (previews.size > 500) previews.clear();
+  previews.set(key, { at: Date.now(), p });
+  return p;
+}

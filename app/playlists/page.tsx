@@ -1,6 +1,8 @@
 import { Alert, Button, Card } from "@mui/material";
 import {
   addMapping,
+  applyAllCovers,
+  applyCover,
   applyMood,
   applySuggestion,
   applySuggestions,
@@ -19,6 +21,7 @@ import { Cover, Icon, Mono, SectionTitle } from "@/components/ui";
 import { getSettings, prisma } from "@/lib/db";
 import { deezerGenreList } from "@/lib/deezer";
 import { parseList } from "@/lib/genres";
+import { coverSub } from "@/lib/coverImage";
 import { lastfmEnabled } from "@/lib/lastfm";
 import { MOODS, moodTags } from "@/lib/moods";
 import { moodCounts, suggestPlaylists, type Suggestion } from "@/lib/suggestions";
@@ -50,7 +53,25 @@ const LastfmNote = () => (
   </Alert>
 );
 
-export default async function Playlists() {
+// Aperçu servi par /api/cover (même rendu que l'image envoyée à Tidal).
+const coverUrl = (name: string, sub: string) => `/api/cover?${new URLSearchParams({ name, sub })}`;
+function CoverImg({ name, sub, size }: { name: string; sub: string; size: number }) {
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- image générée à la volée, pas d'optimisation utile
+    <img
+      src={coverUrl(name, sub)}
+      alt=""
+      width={size}
+      height={size}
+      loading="lazy"
+      className="flex-none bg-raised"
+      style={{ width: size, height: size, borderRadius: Math.round(size * 0.18) }}
+    />
+  );
+}
+
+export default async function Playlists({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+  const { error: actionError } = await searchParams;
   if (!(await prisma.tidalToken.count()))
     return (
       <main className="mx-auto flex max-w-[1280px] flex-col gap-4 px-[clamp(16px,3vw,32px)] pb-16 pt-7">
@@ -94,18 +115,30 @@ export default async function Playlists() {
   for (const p of playlists)
     await prisma.mapping.updateMany({ where: { playlistId: p.id, NOT: { playlistName: p.name } }, data: { playlistName: p.name } });
 
-  const [mappings, genres, settings, unsortedRows] = await Promise.all([
+  const [mappings, genres, settings, unsortedRows, coverRows] = await Promise.all([
     prisma.mapping.findMany({ orderBy: [{ priority: "desc" }, { genre: "asc" }] }),
     prisma.genre.findMany({ orderBy: { name: "asc" } }),
     getSettings(),
     prisma.unsortedTrack.findMany(),
+    prisma.playlistCover.findMany(),
   ]);
+  const covers = new Map(coverRows.map((c) => [c.playlistId, c]));
+  const managedPlaylists = playlists.filter((p) => mappings.some((m) => m.playlistId === p.id));
+  const coversToDo = managedPlaylists.filter((p) => covers.get(p.id)?.name !== p.name).length;
   const ignoredList = parseList(settings.ignoredGenres);
   const ignored = new Set(ignoredList);
   const mapped = new Set(mappings.map((m) => m.genre));
   const known = new Set(playlists.map((p) => p.id));
   const orphans = error ? [] : mappings.filter((m) => !known.has(m.playlistId));
   const playlistNames = new Set(playlists.map((p) => p.name.toLowerCase()));
+  // Sous-titre de pochette d'une ambiance : ses tags libres ou déjà mappés vers elle (même ordre qu'à la création).
+  const mappedTo = new Map(mappings.map((m) => [m.genre, m.playlistName.toLowerCase()]));
+  const moodSub = (m: (typeof MOODS)[number]) =>
+    moodTags(m)
+      .map(([t]) => t)
+      .filter((t) => (mappedTo.get(t) ?? m.name.toLowerCase()) === m.name.toLowerCase())
+      .slice(0, 3)
+      .join(" · ");
 
   // Favoris non classés au dernier passage : comptes par genre + idées de playlists.
   const unsorted = unsortedRows.map((u) => ({ label: u.label, genres: JSON.parse(u.genres) as string[] }));
@@ -146,6 +179,7 @@ export default async function Playlists() {
         </form>
       </Header>
 
+      {actionError && <Alert severity="error">{actionError}</Alert>}
       {error && <Alert severity="error">Lecture des playlists impossible : {error}</Alert>}
       {!ok(tidalGenres).length && !ok(deezer).length && (
         <Alert severity="warning">
@@ -189,7 +223,7 @@ export default async function Playlists() {
               return (
                 <li key={m.name}>
                   <form action={applyMood.bind(null, i)} className="flex items-center gap-3.5 rounded-[14px] bg-raised p-2.5">
-                    <Cover name={m.name} size={52} />
+                    <CoverImg name={m.name} sub={moodSub(m)} size={52} />
                     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-[15px] font-semibold">{m.name}</span>
@@ -225,21 +259,58 @@ export default async function Playlists() {
         <h2 className="m-0 font-display text-[26px] font-bold tracking-[-0.02em]">
           Mes playlists Tidal <span className="font-medium text-faint">· {playlists.length}</span>
         </h2>
-        <span className="text-[13px] text-muted">Priorité : cliquez sur le nombre pour la modifier</span>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <span className="text-[13px] text-muted">Priorité : cliquez sur le nombre pour la modifier</span>
+          {coversToDo > 0 && (
+            <form action={applyAllCovers}>
+              <Button type="submit" size="small" variant="outlined" color="secondary" startIcon={<Icon name="sparkles" size={16} />}>
+                Pochettes générées pour {plural(coversToDo, "playlist gérée", "playlists gérées")}
+              </Button>
+            </form>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))] gap-4">
         {playlists.map((p) => {
           const own = mappings.filter((m) => m.playlistId === p.id);
+          const cover = covers.get(p.id);
+          const sub = coverSub(own);
           return (
             <Card component="article" key={p.id} className="flex flex-col gap-4 p-[18px]">
               <div className="flex items-center gap-3.5">
-                <Cover name={p.name} size={84} rings />
-                <div className="flex min-w-0 flex-col gap-0.5">
+                {/* eslint-disable-next-line @next/next/no-img-element -- image générée à la volée, pas d'optimisation utile */}
+                <img
+                  src={coverUrl(p.name, sub)}
+                  alt=""
+                  width={84}
+                  height={84}
+                  loading="lazy"
+                  className="size-[84px] flex-none rounded-[15px] bg-raised shadow-[0_14px_30px_-16px_rgba(0,0,0,0.8)]"
+                />
+                <div className="flex min-w-0 flex-col gap-1">
                   <h3 className="m-0 font-display text-xl font-semibold leading-[1.15] tracking-tight">{p.name}</h3>
                   <span className="text-[13px] text-muted">
                     {plural(p.tracks, "titre")} · {own.length ? plural(own.length, "genre") : "aucun genre"}
                   </span>
+                  <form action={applyCover.bind(null, p.id, p.name)}>
+                    {cover?.name === p.name ? (
+                      <span className="inline-flex items-center gap-1.5 text-xs text-[#6ee7a0]">
+                        Pochette générée sur Tidal
+                        <button type="submit" className="cursor-pointer border-0 bg-transparent p-0 text-xs text-muted underline underline-offset-2 hover:text-ink">
+                          régénérer
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        type="submit"
+                        className="inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-xs font-semibold text-lilac-soft hover:text-ink"
+                      >
+                        <Icon name="sparkles" size={13} />
+                        {cover ? "Mettre à jour la pochette (playlist renommée)" : "Appliquer la pochette générée"}
+                      </button>
+                    )}
+                  </form>
                 </div>
               </div>
               {own.length ? (
@@ -325,7 +396,7 @@ function Suggestions({ top, rest, unsortedCount }: { top: Suggestion[]; rest: Su
           <li key={s.key}>
             <form action={applySuggestion.bind(null, s.key)} className="flex h-full flex-col gap-3 rounded-[18px] border border-edge bg-stage p-4">
               <div className="flex items-center gap-3">
-                <Cover name={s.name} size={56} rings />
+                <CoverImg name={s.name} sub={s.coverSub} size={56} />
                 <div className="flex min-w-0 flex-col gap-0.5">
                   <span className="truncate font-display text-[17px] font-semibold tracking-tight">{s.name}</span>
                   <span className="text-[13px]">
@@ -367,7 +438,7 @@ function Suggestions({ top, rest, unsortedCount }: { top: Suggestion[]; rest: Su
             {rest.map((s) => (
               <li key={s.key}>
                 <form action={applySuggestion.bind(null, s.key)} className="flex items-center gap-3 rounded-xl p-1.5 hover:bg-raised">
-                  <Cover name={s.name} size={36} />
+                  <CoverImg name={s.name} sub={s.coverSub} size={36} />
                   <span className="min-w-0 flex-1 truncate text-sm font-medium">
                     {s.name} <Mono className="text-xs text-faint">· {s.count}</Mono>
                   </span>

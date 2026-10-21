@@ -1,6 +1,7 @@
 // Test de bout en bout contre un faux serveur Tidal. Prérequis : `pnpm build`. Lancement : `node test/e2e.mjs`
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -29,12 +30,15 @@ const lastfmTracks = {
 };
 const lastfmCalls = [];
 const drops = { tracks: 1, deezer: 1 }; // coupures réseau simulées (socket fermée sans réponse)
-const state = { favorites: ["t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8"], added: {}, manual: {}, created: [], deezerIsrcs: [] };
+const state = { favorites: ["t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8"], added: {}, manual: {}, created: [], deezerIsrcs: [], covers: {}, uploads: [] };
+const createdId = (i) => `p${9 + i}`; // Nouvelle = p9, Indie / folk calme = p10, …
 
 const fake = createServer(async (req, res) => {
   const url = new URL(req.url, FAKE);
-  let body = "";
-  for await (const c of req) body += c;
+  const chunks = [];
+  for await (const c of req) chunks.push(c);
+  const raw = Buffer.concat(chunks);
+  const body = raw.toString();
   const json = (o) => res.writeHead(200, { "content-type": "application/vnd.api+json" }).end(JSON.stringify(o));
   const p = url.pathname;
   const ids = url.searchParams.getAll("filter[id]");
@@ -47,7 +51,7 @@ const fake = createServer(async (req, res) => {
     const isrc = decodeURIComponent(p.split(":")[1]);
     state.deezerIsrcs.push(isrc);
     if (isrc === "ISRC6") return json({ id: 6, album: { id: 66 } });
-    return json(isrc === "ISRC5" ? { id: 5, album: { id: 55 } } : { error: { type: "DataException", code: 800 } });
+    return json(isrc === "ISRC5" ? { id: 5, album: { id: 55 }, preview: "https://cdn.test/p5.mp3", link: "https://deezer.test/5" } : { error: { type: "DataException", code: 800 } });
   }
   if (p === "/deezer/album/66") return json({ id: 66, genres: { data: [{ id: 116, name: "Rap/Hip Hop" }, { id: 117, name: "Rap français" }] } });
   if (p === "/lastfm/") {
@@ -58,6 +62,7 @@ const fake = createServer(async (req, res) => {
     if (method === "artist.gettoptags") return json({ toptags: { tag: { name: "Artist Tag", count: 100 } } }); // objet seul
   }
   if (p === "/deezer/album/55") return json({ id: 55, genres: { data: [{ id: 2, name: "Reggae" }] } });
+  if (p === "/deezer/search") return json({ data: [] });
   if (p === "/deezer/genre") return json({ data: [{ id: 0, name: "All" }, { id: 1, name: "Pop" }, { id: 2, name: "Reggae" }] });
 
   if (p === "/token") return json({ access_token: "AT", refresh_token: "RT", expires_in: 3600 });
@@ -65,7 +70,13 @@ const fake = createServer(async (req, res) => {
   if (p === "/v2/playlists" && req.method === "GET") {
     assert.equal(url.searchParams.get("filter[owners.id]"), "u1");
     return url.searchParams.get("page[cursor]")
-      ? json({ data: [{ id: "p2", type: "playlists", attributes: { name: "Jazz", numberOfTrackItems: 3 } }], links: {} })
+      ? json({
+          data: [
+            { id: "p2", type: "playlists", attributes: { name: "Jazz", numberOfTrackItems: 3 } },
+            ...state.created.map((name, i) => ({ id: createdId(i), type: "playlists", attributes: { name, numberOfTrackItems: 0 } })),
+          ],
+          links: {},
+        })
       : json({
           data: [{ id: "p1", type: "playlists", attributes: { name: "Rock", numberOfTrackItems: 5 } }],
           links: { next: "/playlists?filter[owners.id]=u1&page[cursor]=c2" },
@@ -73,10 +84,14 @@ const fake = createServer(async (req, res) => {
   }
   if (p === "/v2/playlists" && req.method === "POST") {
     state.created.push(JSON.parse(body).data.attributes.name);
-    return json({ data: { id: "p9", type: "playlists" } });
+    return json({ data: { id: createdId(state.created.length - 1), type: "playlists" } });
   }
   if (p === "/v2/userCollectionTracks/me/relationships/items" && req.method === "GET")
     return json({ data: state.favorites.map((id) => ({ id, type: "tracks" })), links: {} });
+  if (p === "/v2/userCollectionTracks/me/relationships/items" && req.method === "POST") {
+    for (const { id } of JSON.parse(body).data) if (!state.favorites.includes(id)) state.favorites.push(id);
+    return json({ data: [] });
+  }
   if (p === "/v2/userCollectionTracks/me/relationships/items" && req.method === "DELETE") {
     const rm = JSON.parse(body).data.map((d) => d.id);
     state.favorites = state.favorites.filter((id) => !rm.includes(id));
@@ -102,6 +117,38 @@ const fake = createServer(async (req, res) => {
       included: [...genreRes(Object.keys(genres)), { id: "ar1", type: "artists", attributes: { name: "Artist" } }],
     });
   }
+  const one = p.match(/^\/v2\/tracks\/(\w+)$/);
+  if (one)
+    return json({
+      data: { id: one[1], type: "tracks", attributes: { title: tracks[one[1]].title, isrc: tracks[one[1]].isrc ?? `ISRC-${one[1]}` } },
+      included: [{ id: "ar1", type: "artists", attributes: { name: "Artist" } }],
+    });
+  // Pochettes : déclaration, envoi (Content-MD5 vérifié), rattachement à la playlist
+  if (p === "/v2/artworks" && req.method === "POST") {
+    const { mediaType, sourceFile } = JSON.parse(body).data.attributes;
+    assert.equal(mediaType, "IMAGE");
+    const id = `art${state.uploads.length + 1}`;
+    state.uploads.push({ id, md5: sourceFile.md5Hash, size: sourceFile.size });
+    return json({ data: { id, type: "artworks", attributes: { sourceFile: { ...sourceFile, uploadLink: { href: `${FAKE}/upload/${id}`, meta: { method: "PUT", headers: { "Content-MD5": sourceFile.md5Hash } } } } } } });
+  }
+  const up = p.match(/^\/upload\/(\w+)$/);
+  if (up && req.method === "PUT") {
+    const u = state.uploads.find((x) => x.id === up[1]);
+    const bytes = raw;
+    assert.equal(req.headers["content-md5"], createHash("md5").update(bytes).digest("base64"));
+    assert.equal(bytes.length, u.size);
+    assert.equal(bytes.subarray(1, 4).toString(), "PNG");
+    u.ok = true;
+    return res.writeHead(200).end();
+  }
+  const cov = p.match(/^\/v2\/playlists\/(\w+)\/relationships\/coverArt$/);
+  if (cov && req.method === "PATCH") {
+    const [{ id, type }] = JSON.parse(body).data;
+    assert.equal(type, "artworks");
+    assert.ok(state.uploads.find((x) => x.id === id)?.ok, "pochette envoyée avant rattachement");
+    state.covers[cov[1]] = id;
+    return res.writeHead(204).end();
+  }
   if (p === "/v2/albums")
     return json({
       data: ids.map((id) => ({ id, type: "albums", relationships: { genres: { data: albums[id].map((g) => ({ id: g, type: "genres" })) } } })),
@@ -109,7 +156,17 @@ const fake = createServer(async (req, res) => {
     });
   const m = p.match(/^\/v2\/playlists\/(\w+)\/relationships\/items$/);
   if (m && req.method === "GET")
-    return json({ data: [...(state.manual[m[1]] ?? []), ...(state.added[m[1]] ?? [])].map((id) => ({ id, type: "tracks" })), links: {} });
+    return json({
+      data: [...(state.manual[m[1]] ?? []), ...(state.added[m[1]] ?? [])].map((id) => ({ id, type: "tracks", meta: { itemId: `${m[1]}:${id}` } })),
+      links: {},
+    });
+  if (m && req.method === "DELETE") {
+    for (const { id, meta } of JSON.parse(body).data) {
+      assert.equal(meta.itemId, `${m[1]}:${id}`);
+      state.added[m[1]] = (state.added[m[1]] ?? []).filter((x) => x !== id);
+    }
+    return res.writeHead(204).end();
+  }
   if (m && req.method === "POST") {
     assert.equal(JSON.parse(body).meta.onDuplicates, "SKIP");
     (state.added[m[1]] ??= []).push(...JSON.parse(body).data.map((d) => d.id));
@@ -135,6 +192,7 @@ const env = {
   PORT: "3999",
   HOSTNAME: "127.0.0.1",
   HTTP_RETRY_DELAYS_MS: "50,50",
+  COVER_FONT_CDN: "", // pas de téléchargement de police en test : police par défaut de next/og
 };
 execFileSync("node", ["migrate.mjs"], { env, stdio: "inherit" });
 const app = spawn("node", [".next/standalone/server.js"], { env, stdio: "inherit" });
@@ -226,12 +284,14 @@ try {
   assert.ok(pl.includes(">Rock<") && pl.includes(">Jazz<"), "playlists des 2 pages affichées");
   await submit("/playlists", "Créer", { name: "Nouvelle" });
   assert.deepEqual(state.created, ["Nouvelle"]);
+  assert.equal(state.covers.p9, "art1"); // pochette générée et rattachée dès la création
   await submit("/playlists", "Ajouter des genres à Rock", { genres: "Rock" });
   await submit("/playlists", "Ajouter des genres à Jazz", { genres: "jazz, Blues" });
   await submit("/playlists", "Ajouter des genres à Rock", { genres: "Rap/Hip Hop" }); // générique : priorité auto 0
   await submit("/playlists", "Ajouter des genres à Jazz", { genres: "rap français" }); // spécifique : priorité auto 10
   await submit("/playlists", "Indie / folk calme"); // ambiance : crée la playlist p9 + tags
   assert.deepEqual(state.created, ["Nouvelle", "Indie / folk calme"]);
+  assert.equal(state.covers.p10, "art2");
   const pl2 = await page("/playlists");
   assert.ok(pl2.includes("rock") && pl2.includes("blues"));
   // Autocomplétion : genres Tidal non encore mappés (rock/jazz le sont déjà)
@@ -264,14 +324,14 @@ try {
   state.manual.p2 = ["t6"];
   await submit("/", "Synchronisation réelle");
   await waitIdle();
-  assert.deepEqual(state.added, { p1: ["t1"], p2: ["t2"], p9: ["t8"] }); // doublon t7 non ajouté, t6 déjà dans p2
+  assert.deepEqual(state.added, { p1: ["t1"], p2: ["t2"], p10: ["t8"] }); // doublon t7 non ajouté, t6 déjà dans p2
   assert.deepEqual(state.favorites, ["t3", "t4", "t5"]); // mais retirés des favoris
   dash = await page("/");
   assert.match(dash, /Song Six — déjà dans « Jazz » : non ré-ajouté, retiré des favoris/);
   assert.match(dash, /Titres triés<[\s\S]*?>5</);
 
   // Mode « conserver les favoris » + tous les favoris analysés
-  await submit("/", "Enregistrer", { cronExpression: "0 * * * *", scanLimit: "0" });
+  await submit("/", "Enregistrer", { cronExpression: "0 * * * *", scanLimit: "0", pruneMismatched: "on" });
   assert.match(await page("/"), /Favoris conservés/);
   state.added.p1 = []; // t1 retiré de la playlist à la main…
   state.favorites = ["t9", "t1", ...state.favorites, "t9"]; // … puis re-liké ; t9 est un nouveau like (renvoyé 2 fois par Tidal)
@@ -305,6 +365,51 @@ try {
   const pl4 = await page("/playlists");
   assert.doesNotMatch(pl4, /Idées de playlists/); // tous leurs tags sont maintenant mappés
   assert.doesNotMatch(pl4.slice(pl4.indexOf("Genres détectés non mappés"), pl4.indexOf("Playlists d")), /artist tag/);
+
+  // Rangement : « artist tag » (prio 10) bat désormais « rock » et « jazz » (génériques, prio 0) ; t1, retiré à la
+  // main de Rock, n'est pas touché. Nouveaux favoris t3/t4 → Artist Tag (p11), t5 → Reggae (p13).
+  await submit("/", "Synchronisation réelle");
+  await waitIdle();
+  dash = await page("/");
+  assert.match(dash, /Song Nine → « Artist Tag » via artist tag \(retiré de « Rock »\)/);
+  assert.match(dash, /Song Two → « Artist Tag » via artist tag \(retiré de « Jazz »\)/);
+  assert.deepEqual(state.added.p1, []);
+  assert.deepEqual(state.added.p2, []);
+  assert.deepEqual(state.added.p11.sort(), ["t2", "t3", "t4", "t9"]);
+  assert.deepEqual(state.added.p13, ["t5"]);
+  assert.deepEqual(state.added.p10, ["t8"]); // indie folk (prio 20) reste devant artist tag
+
+  // Plus de « artist tag » ni de « jazz » : chacun retrouve sa playlist, ou sort et revient en favori.
+  await submit("/playlists", "Ajouter des genres à Artist Tag", { genres: "garder géré" }); // Artist Tag reste gérée
+  await submit("/playlists", 'aria-label="Retirer artist tag"');
+  await submit("/playlists", 'aria-label="Retirer jazz"');
+  await submit("/", "Synchronisation réelle");
+  await waitIdle();
+  dash = await page("/");
+  assert.match(dash, /Song Nine → « Rock » via rock \(retiré de « Artist Tag »\)/);
+  assert.match(dash, /Song Four → « Électro chill » via electro \(retiré de « Artist Tag »\)/);
+  assert.match(dash, /Song Three — retiré de « Artist Tag » : plus aucun genre mappé/);
+  assert.match(dash, /Song Two — retiré de « Artist Tag » : plus aucun genre mappé, remis en favori/);
+  assert.deepEqual(state.added.p11, []);
+  assert.deepEqual(state.added.p1, ["t9"]);
+  assert.ok(state.favorites.includes("t2") && state.favorites.filter((x) => x === "t3").length === 1);
+
+  // Pochettes générées pour les playlists existantes + aperçu
+  const pl5 = await page("/playlists");
+  assert.match(pl5, /Pochette générée sur Tidal/); // playlists créées par l'appli
+  await submit("/playlists", "Appliquer la pochette générée"); // la 1re : Rock
+  assert.ok(state.covers.p1);
+  await submit("/playlists", "Pochettes générées pour");
+  assert.ok(state.covers.p2 && state.covers.p11 && state.covers.p12 && state.covers.p13);
+  assert.equal(state.covers.p9, "art1"); // Nouvelle : aucun genre, pas gérée, pochette inchangée
+  const png = await http(`/api/cover?name=${encodeURIComponent("Électro chill")}&sub=electro`);
+  assert.equal(png.headers.get("content-type"), "image/png");
+  assert.equal(Buffer.from(await png.arrayBuffer()).subarray(1, 4).toString(), "PNG");
+
+  // Extraits audio des logs
+  assert.match(dash, /aria-label="Écouter un extrait \(30 s\)"/);
+  assert.deepEqual(await (await http("/api/preview/t5")).json(), { url: "https://cdn.test/p5.mp3", link: "https://deezer.test/5" });
+  assert.equal((await http("/api/preview/t3")).status, 404); // ni ISRC ni recherche Deezer
 
   // Planification
   assert.match((await submit("/", "Enregistrer", { cronExpression: "pas un cron", cronEnabled: "on" })).headers.get("location") ?? "", /error=/);

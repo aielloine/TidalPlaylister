@@ -117,6 +117,7 @@ type Resource = {
   type: string;
   attributes?: Record<string, any>;
   relationships?: Record<string, { data?: { id: string; type: string }[] }>;
+  meta?: Record<string, any>;
 };
 type JsonApiDoc = { data: Resource | Resource[]; included?: Resource[]; links?: { next?: string } };
 
@@ -167,9 +168,67 @@ export async function addToPlaylist(playlistId: string, trackIds: string[]) {
     });
 }
 
-export async function getPlaylistTrackIds(playlistId: string) {
+// trackId -> identifiants des entrées de la playlist (un titre peut y figurer plusieurs fois).
+export async function getPlaylistItems(playlistId: string) {
   const data = await all(`/playlists/${playlistId}/relationships/items?countryCode=${await country()}`);
-  return new Set(data.filter((d) => d.type === "tracks").map((d) => d.id));
+  const items = new Map<string, string[]>();
+  for (const d of data.filter((d) => d.type === "tracks")) items.set(d.id, [...(items.get(d.id) ?? []), d.meta?.itemId].filter(Boolean));
+  return items;
+}
+
+export const getPlaylistTrackIds = async (playlistId: string) => new Set((await getPlaylistItems(playlistId)).keys());
+
+// Retire des entrées d'une playlist (Tidal exige l'itemId de chaque entrée, pas seulement l'id du titre).
+export async function removeFromPlaylist(playlistId: string, entries: { trackId: string; itemId: string }[]) {
+  for (const part of chunk(entries, 20))
+    await api(`/playlists/${playlistId}/relationships/items`, {
+      method: "DELETE",
+      body: JSON.stringify({ data: part.map((e) => ({ id: e.trackId, type: "tracks", meta: { itemId: e.itemId } })) }),
+    });
+}
+
+// ---------- Pochettes ----------
+
+// 1. déclare l'image (POST /artworks, md5 + taille) ; 2. envoie le fichier sur le lien fourni ; 3. l'attache à la
+// playlist (PATCH coverArt). Le format attendu du md5 n'est pas documenté : base64 (Content-MD5), puis hexadécimal.
+export async function setPlaylistCover(playlistId: string, png: Buffer): Promise<string> {
+  const md5 = createHash("md5").update(png);
+  const digest = md5.digest();
+  let lastError: Error | undefined;
+  for (const md5Hash of [digest.toString("base64"), digest.toString("hex")]) {
+    let uploaded = false;
+    try {
+      const doc = await api(`/artworks?countryCode=${await country()}`, {
+        method: "POST",
+        headers: { "Idempotency-Key": randomBytes(16).toString("hex") },
+        body: JSON.stringify({ data: { type: "artworks", attributes: { mediaType: "IMAGE", sourceFile: { md5Hash, size: png.length } } } }),
+      });
+      const artwork = doc.data as Resource;
+      const link = artwork.attributes?.sourceFile?.uploadLink as { href: string; meta?: { method?: string; headers?: Record<string, string> } } | undefined;
+      if (!link?.href) throw new Error("Tidal n'a pas renvoyé de lien d'envoi pour l'image");
+      const up = await fetchRetry(link.href, { method: link.meta?.method ?? "PUT", headers: link.meta?.headers ?? {}, body: new Uint8Array(png) }, "Envoi pochette");
+      if (!up.ok) throw new Error(`Envoi de l'image refusé (${up.status}): ${(await up.text()).slice(0, 300)}`);
+      uploaded = true;
+      await api(`/playlists/${playlistId}/relationships/coverArt`, {
+        method: "PATCH",
+        body: JSON.stringify({ data: [{ id: artwork.id, type: "artworks" }] }),
+      });
+      return artwork.id;
+    } catch (e) {
+      if (uploaded) throw e; // image envoyée : seul l'attachement a échoué, inutile d'en recréer une
+      lastError = e as Error;
+    }
+  }
+  throw lastError!;
+}
+
+// ---------- Titre seul (extraits audio) ----------
+
+export async function getTrackInfo(trackId: string) {
+  const doc = await api(`/tracks/${encodeURIComponent(trackId)}?${qs([["include", "artists"], ["countryCode", await country()]])}`);
+  const t = doc.data as Resource;
+  const artist = (doc.included ?? []).find((r) => r.type === "artists")?.attributes?.name as string | undefined;
+  return { isrc: t.attributes?.isrc as string | undefined, title: (t.attributes?.title as string) ?? "", artist: artist ?? "" };
 }
 
 // ---------- Favoris ----------
@@ -179,6 +238,14 @@ export async function getFavoriteTrackIds(limit: number) {
   const data = await all(`/userCollectionTracks/me/relationships/items?sort=-addedAt`, limit || Infinity);
   // Tidal peut renvoyer un même titre deux fois (chevauchement de pages) : dédoublonné, ordre conservé.
   return [...new Set(data.filter((d) => d.type === "tracks").map((d) => d.id))];
+}
+
+export async function addFavorites(trackIds: string[]) {
+  for (const ids of chunk(trackIds, 50))
+    await api(`/userCollectionTracks/me/relationships/items`, {
+      method: "POST",
+      body: JSON.stringify({ data: ids.map((id) => ({ id, type: "tracks" })) }),
+    });
 }
 
 export async function removeFavorites(trackIds: string[]) {

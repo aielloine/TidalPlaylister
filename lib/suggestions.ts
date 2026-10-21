@@ -9,6 +9,7 @@ export type Suggestion = {
   tags: string[]; // tags libres qui les couvrent, du plus fréquent au moins fréquent
   examples: string[];
   exists: boolean; // une playlist de ce nom existe déjà : elle sera complétée
+  coverSub: string; // sous-titre de la pochette qui sera générée (3 premiers tags mappés)
 };
 
 const MIN_GENRE_HITS = 3; // en dessous, un genre seul ne justifie pas une playlist
@@ -31,8 +32,9 @@ export function suggestPlaylists(tracks: Unsorted[], mapped: Set<string>, ignore
   const out: Suggestion[] = [];
 
   MOODS.forEach((m, i) => {
-    const c = cover(tracks, new Set(moodTags(m).map(([g]) => g).filter(free)));
-    if (c.count) out.push({ key: `mood:${i}`, name: m.name, exists: playlistNames.has(m.name.toLowerCase()), ...c });
+    const tags = moodTags(m).map(([g]) => g).filter(free);
+    const c = cover(tracks, new Set(tags));
+    if (c.count) out.push({ key: `mood:${i}`, name: m.name, exists: playlistNames.has(m.name.toLowerCase()), coverSub: tags.slice(0, 3).join(" · "), ...c });
   });
 
   // Genres fréquents qu'aucune idée du catalogue ne couvre : une playlist à leur nom.
@@ -42,7 +44,7 @@ export function suggestPlaylists(tracks: Unsorted[], mapped: Set<string>, ignore
   for (const [g, n] of freq) {
     if (n < MIN_GENRE_HITS) continue;
     const name = titleCase(g);
-    out.push({ key: `genre:${g}`, name, exists: playlistNames.has(name.toLowerCase()), ...cover(tracks, new Set([g])) });
+    out.push({ key: `genre:${g}`, name, exists: playlistNames.has(name.toLowerCase()), coverSub: g, ...cover(tracks, new Set([g])) });
   }
 
   return out.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));

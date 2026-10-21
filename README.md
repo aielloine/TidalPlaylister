@@ -24,6 +24,12 @@ Dans les deux cas :
 - un titre classé est mémorisé : s'il est ensuite **retiré de la playlist à la main**, il n'y revient jamais (même
   re-liké, ou si son mapping change). En mode « retirer », un titre déjà classé encore en favori en est retiré.
 
+**Ranger à nouveau** (réglage, activé par défaut) : à chaque synchro, les titres déjà classés par l'appli sont
+ré-évalués avec leurs genres mémorisés. Si un changement de mapping (genre supprimé, réassigné, ignoré…) les mène
+ailleurs, ils changent de playlist ; s'ils ne correspondent plus à rien, ils sont retirés de la playlist et remis
+en favori. Seules les playlists encore mappées sont concernées, et jamais un titre retiré à la main ou présent
+avant l'appli. Les titres classés avant cette fonction sont ré-analysés par lots de 200 par passage.
+
 « Favoris analysés par passage » : les N favoris les plus récents (300 par défaut), **identique en dry run et en
 réel** ; 0 = tous. Les titres déjà classés ne sont pas ré-analysés, donc « tous » reste rapide après le 1er passage.
 
@@ -35,6 +41,12 @@ Sur `/playlists` :
 - **Playlists d'ambiance** : le catalogue complet (22 idées, `lib/moods.ts`), chacune crée la playlist et mappe d'un
   coup les tags Last.fm correspondants.
 - Un clic sur un **genre détecté non mappé** permet de l'associer à une playlist ou de l'ignorer.
+- **Pochettes générées** : chaque playlist créée par l'appli reçoit une pochette (dégradé propre à son type, nom,
+  ses genres principaux et le bandeau « Tidal Playlister »). Les playlists existantes peuvent la recevoir d'un clic,
+  ou toutes les playlists gérées d'un coup. Polices (Bricolage Grotesque, Geist — OFL) téléchargées une fois depuis
+  jsdelivr dans `data/fonts` ; à défaut, police par défaut.
+
+Dans les logs, ▶ joue un **extrait de 30 s** (Deezer, retrouvé par ISRC) et ↗ ouvre le titre dans Tidal.
 
 ## Prérequis Tidal
 1. Créer une app sur https://developer.tidal.com/dashboard
