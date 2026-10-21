@@ -187,39 +187,10 @@ export async function removeFromPlaylist(playlistId: string, entries: { trackId:
     });
 }
 
-// ---------- Pochettes ----------
-
-// 1. déclare l'image (POST /artworks, md5 + taille) ; 2. envoie le fichier sur le lien fourni ; 3. l'attache à la
-// playlist (PATCH coverArt). Le format attendu du md5 n'est pas documenté : base64 (Content-MD5), puis hexadécimal.
-export async function setPlaylistCover(playlistId: string, png: Buffer): Promise<string> {
-  const md5 = createHash("md5").update(png);
-  const digest = md5.digest();
-  let lastError: Error | undefined;
-  for (const md5Hash of [digest.toString("base64"), digest.toString("hex")]) {
-    let uploaded = false;
-    try {
-      const doc = await api(`/artworks?countryCode=${await country()}`, {
-        method: "POST",
-        headers: { "Idempotency-Key": randomBytes(16).toString("hex") },
-        body: JSON.stringify({ data: { type: "artworks", attributes: { mediaType: "IMAGE", sourceFile: { md5Hash, size: png.length } } } }),
-      });
-      const artwork = doc.data as Resource;
-      const link = artwork.attributes?.sourceFile?.uploadLink as { href: string; meta?: { method?: string; headers?: Record<string, string> } } | undefined;
-      if (!link?.href) throw new Error("Tidal n'a pas renvoyé de lien d'envoi pour l'image");
-      const up = await fetchRetry(link.href, { method: link.meta?.method ?? "PUT", headers: link.meta?.headers ?? {}, body: new Uint8Array(png) }, "Envoi pochette");
-      if (!up.ok) throw new Error(`Envoi de l'image refusé (${up.status}): ${(await up.text()).slice(0, 300)}`);
-      uploaded = true;
-      await api(`/playlists/${playlistId}/relationships/coverArt`, {
-        method: "PATCH",
-        body: JSON.stringify({ data: [{ id: artwork.id, type: "artworks" }] }),
-      });
-      return artwork.id;
-    } catch (e) {
-      if (uploaded) throw e; // image envoyée : seul l'attachement a échoué, inutile d'en recréer une
-      lastError = e as Error;
-    }
-  }
-  throw lastError!;
+// Supprime une playlist (fusion). Les pochettes ne sont pas gérées ici : POST /artworks est refusé aux accès
+// tiers (« Access tier is insufficient »), elles se téléchargent depuis l'appli et se posent à la main.
+export async function deletePlaylist(playlistId: string) {
+  await api(`/playlists/${playlistId}`, { method: "DELETE" });
 }
 
 // ---------- Titre seul (extraits audio) ----------

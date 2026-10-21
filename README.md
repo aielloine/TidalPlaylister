@@ -1,4 +1,4 @@
-# Tidal Playlister
+# Auto Playlister
 
 Trie automatiquement les titres likés sur Tidal vers des playlists selon leur genre ou leur ambiance.
 
@@ -40,11 +40,17 @@ Sur `/playlists` :
   sur Tidal et mappe ses tags ; les titres sont rangés à la synchro suivante.
 - **Playlists d'ambiance** : le catalogue complet (22 idées, `lib/moods.ts`), chacune crée la playlist et mappe d'un
   coup les tags Last.fm correspondants.
+- **Ajouter à…** (idées et ambiances) : met leurs tags encore libres dans une playlist existante au lieu d'en créer une.
+- **Fusionner des playlists** : les titres des playlists cochées sont copiés dans la cible (sans doublon), leurs
+  genres mappés et le suivi des titres déjà classés passent sur la cible ; les sources peuvent ensuite être
+  supprimées sur Tidal (option, désactivée par défaut).
 - Un clic sur un **genre détecté non mappé** permet de l'associer à une playlist ou de l'ignorer.
-- **Pochettes générées** : chaque playlist créée par l'appli reçoit une pochette (dégradé propre à son type, nom,
-  ses genres principaux et le bandeau « Tidal Playlister »). Les playlists existantes peuvent la recevoir d'un clic,
-  ou toutes les playlists gérées d'un coup. Polices (Bricolage Grotesque, Geist — OFL) téléchargées une fois depuis
-  jsdelivr dans `data/fonts` ; à défaut, police par défaut.
+- **Pochettes générées** : chaque playlist gérée (au moins un genre mappé) a sa pochette JPEG 1080 × 1080 : dégradé
+  de sa famille de genres, arc Crescendo, badge AUTO, ses 3 genres principaux et son nom. Elle s'affiche partout
+  dans l'appli et se **télécharge** depuis la carte de la playlist : l'API Tidal refuse l'envoi de pochettes aux
+  applis tierces (`POST /artworks` → 403 « Access tier is insufficient »), il faut donc l'ajouter à la main depuis
+  l'appli Tidal. Polices (Bricolage Grotesque, Geist Mono — OFL) téléchargées une fois depuis jsdelivr dans
+  `data/fonts` ; à défaut, police par défaut.
 
 Dans les logs, ▶ joue un **extrait de 30 s** (Deezer, retrouvé par ISRC) et ↗ ouvre le titre dans Tidal.
 
