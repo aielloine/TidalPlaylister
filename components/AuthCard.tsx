@@ -25,7 +25,7 @@ export default function AuthCard({ title, badge, intro, lilac, children }: { tit
       </div>
       <main className="relative flex w-full max-w-[420px] flex-col gap-7">
         <div className="flex flex-col items-center gap-3.5">
-          <Logo size={56} id="auth-logo" />
+          <Logo size={56} />
           <Wordmark size={26} />
         </div>
         <section

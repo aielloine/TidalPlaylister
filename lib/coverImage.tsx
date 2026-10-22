@@ -1,21 +1,30 @@
-// Pochettes générées (PNG 1080 × 1080) pour les playlists : dégradé propre à chaque type de playlist, sillons de
-// vinyle, nom en Bricolage Grotesque, et bandeau « Tidal Playlister » pour reconnaître d'un coup d'œil les
-// playlists gérées par l'appli.
+// Pochettes générées (JPEG 1080 × 1080) des playlists gérées : dégradé de la famille de genres, halo, arc
+// Crescendo fixe (signature), badge AUTO, 3 genres en mono et nom en Bricolage Grotesque.
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { ImageResponse } from "next/og";
 import { coverColors } from "./covers";
+
+// sharp (encodage JPEG, réduction) est déjà installé avec Next, qui s'en sert pour next/image et l'embarque dans la
+// sortie standalone : on le charge depuis le dossier de next plutôt que d'en faire une dépendance de plus.
+type SharpImage = { resize(w: number, h: number): SharpImage; jpeg(o: { quality: number; mozjpeg?: boolean }): SharpImage; toBuffer(): Promise<Buffer> };
+const gs = globalThis as unknown as { sharp?: (input: Buffer) => SharpImage };
+const sharp = (input: Buffer) => (gs.sharp ??= createRequire(join(process.cwd(), "node_modules", "next", "package.json"))("sharp"))(input);
 
 export const COVER_SIZE = 1080;
 
 // Polices téléchargées une fois (jsdelivr, licence OFL) puis gardées à côté de la base. Si le téléchargement
 // échoue, next/og utilise sa police par défaut : la pochette reste générée.
 const FONT_CDN = process.env.COVER_FONT_CDN ?? "https://cdn.jsdelivr.net/npm";
-const FONTS = [
-  { name: "Bricolage", weight: 800 as const, pkg: "@fontsource/bricolage-grotesque@5.3.0", file: "bricolage-grotesque-latin-800-normal.woff" },
-  { name: "Geist", weight: 600 as const, pkg: "@fontsource/geist-sans@5.3.0", file: "geist-sans-latin-600-normal.woff" },
+type FontName = "Bricolage" | "GeistMono";
+const FONTS: { name: FontName; weight: 500 | 600 | 800; pkg: string; file: string }[] = [
+  { name: "Bricolage", weight: 800, pkg: "@fontsource/bricolage-grotesque@5.3.0", file: "bricolage-grotesque-latin-800-normal.woff" },
+  { name: "GeistMono", weight: 500, pkg: "@fontsource/geist-mono@5.3.0", file: "geist-mono-latin-500-normal.woff" },
+  { name: "GeistMono", weight: 600, pkg: "@fontsource/geist-mono@5.3.0", file: "geist-mono-latin-600-normal.woff" },
 ];
-const g = globalThis as unknown as { coverFonts?: Promise<{ name: string; data: ArrayBuffer; weight: 800 | 600 }[]> };
+type Font = { name: FontName; weight: 500 | 600 | 800; data: ArrayBuffer };
+const g = globalThis as unknown as { coverFonts?: Promise<Font[]> };
 
 const fontDir = () => join(dirname((process.env.DATABASE_URL ?? "file:./data/tidal.db").replace(/^file:/, "")), "fonts");
 
@@ -41,14 +50,13 @@ async function loadFont(f: (typeof FONTS)[number]) {
 
 function fonts() {
   g.coverFonts ??= Promise.all(FONTS.map(async (f) => ({ name: f.name, weight: f.weight, data: await loadFont(f) }))).then((list) => {
-    const ok = list.filter((f): f is { name: string; weight: 800 | 600; data: ArrayBuffer } => !!f.data);
+    const ok = list.filter((f): f is Font => !!f.data);
     if (ok.length < FONTS.length) g.coverFonts = undefined; // réessayé à la prochaine pochette
     return ok;
   });
   return g.coverFonts;
 }
 
-// Texte sombre sur dégradé clair, blanc sur dégradé sombre.
 function luminance(hex: string) {
   const n = parseInt(hex.slice(1), 16);
   const [r, g2, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => {
@@ -66,75 +74,123 @@ export const coverSub = (mappings: { genre: string; priority: number; id: number
     .map((m) => m.genre)
     .join(" · ");
 
-const titleSize = (name: string) => (name.length <= 8 ? 168 : name.length <= 14 ? 136 : name.length <= 22 ? 112 : 92);
+// Arc Crescendo : 13 barres à angle fixe (263° + 25°·i depuis le haut, sens horaire), longueur 0,03 S → 0,21 S,
+// opacité 0,55 → 0,95, autour du centre (0,80 S ; 0,24 S) à partir d'un rayon intérieur de 0,13 S.
+function arcLines(S: number) {
+  const cx = S * 0.8, cy = S * 0.24, rr = S * 0.13, w = S * 0.034;
+  return Array.from({ length: 13 }, (_, i) => {
+    const t = i / 12;
+    const l = S * (0.03 + 0.18 * t);
+    const a = ((263 + 25 * i) * Math.PI) / 180;
+    const [dx, dy] = [Math.sin(a), -Math.cos(a)];
+    // Les bouts arrondis débordent de w/2 : on raccourcit le trait pour garder la longueur totale l.
+    const r0 = rr + Math.min(w, l) / 2, r1 = rr + l - Math.min(w, l) / 2;
+    return { x1: cx + dx * r0, y1: cy + dy * r0, x2: cx + dx * r1, y2: cy + dy * r1, o: 0.55 + 0.4 * t, w };
+  });
+}
+
+// Mini-logo du badge (viewBox 64).
+const MINI: [number, number, number, number][] = [
+  [28.58, 41.4, 27.21, 45.16],
+  [23.57, 37.37, 18.82, 40.4],
+  [22.04, 31.13, 14.82, 30.5],
+  [24.63, 25.24, 18.08, 19.25],
+  [30.26, 22.15, 28.44, 11.81],
+  [36.62, 23.13, 42.22, 12.37],
+  [41.06, 27.77, 53.52, 21.96],
+  [41.76, 34.16, 56.77, 37.49],
+  [38.43, 39.66, 49.36, 52.68],
+];
+
+const r1 = (n: number) => Math.round(n * 10) / 10;
 
 // subtitle : quelques genres de la playlist (ex. « french house · nu disco · chillwave »).
-export async function renderCover(name: string, subtitle = ""): Promise<Buffer> {
+async function renderPng(name: string, subtitle: string): Promise<Buffer> {
   const [a, b] = coverColors(name);
-  const dark = (luminance(a) + luminance(b)) / 2 > 0.33;
-  const ink = dark ? "#0b0d10" : "#ffffff";
-  const soft = dark ? "rgba(11,13,16,0.62)" : "rgba(255,255,255,0.78)";
-  const ring = dark ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.18)";
+  const dark = luminance(a) < 0.1; // dégradé sombre (ex. synthwave) : encre claire, badge inversé
+  const ink = dark ? "#fdf0ff" : "#0b0d10";
   const fontList = await fonts();
   // Police absente (téléchargement impossible) : propriété omise, une valeur undefined fait planter le rendu.
-  const font = (n: string) => (fontList.some((f) => f.name === n) ? { fontFamily: n } : {});
+  const font = (n: FontName) => (fontList.some((f) => f.name === n) ? { fontFamily: n } : {});
   const S = COVER_SIZE;
+  const pad = Math.round(S * 0.07);
+  const ic = Math.round(S * 0.05);
 
   const img = new ImageResponse(
     (
-      <div style={{ width: S, height: S, display: "flex", position: "relative", overflow: "hidden", background: `linear-gradient(140deg, ${a}, ${b})` }}>
-        {/* sillons de vinyle */}
-        {[1300, 1060, 820, 580].map((d) => (
-          <div
-            key={d}
-            style={{ position: "absolute", width: d, height: d, right: -d / 2 + 120, bottom: -d / 2 + 120, borderRadius: d, border: `3px solid ${ring}` }}
-          />
-        ))}
-        <div style={{ position: "absolute", left: 88, top: 88, right: 88, bottom: 88, display: "flex", flexDirection: "column" }}>
-          {/* égaliseur rangé par taille : le logo de l'appli */}
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 22, height: 220 }}>
-            {[0.36, 0.55, 0.77, 1].map((h) => (
-              <div key={h} style={{ width: 52, height: 220 * h, borderRadius: 26, background: dark ? "rgba(11,13,16,0.72)" : "rgba(255,255,255,0.9)" }} />
+      <div
+        style={{
+          width: S,
+          height: S,
+          display: "flex",
+          position: "relative",
+          overflow: "hidden",
+          backgroundImage: `radial-gradient(${Math.round(S * 0.9)}px ${Math.round(S * 0.7)}px at 85% 15%, rgba(255,255,255,${dark ? 0.1 : 0.28}), transparent 60%), linear-gradient(150deg, ${a}, ${b})`,
+        }}
+      >
+        <svg width={S} height={S} viewBox={`0 0 ${S} ${S}`} style={{ position: "absolute", left: 0, top: 0 }}>
+          {arcLines(S).map((l, i) => (
+            <line key={i} x1={r1(l.x1)} y1={r1(l.y1)} x2={r1(l.x2)} y2={r1(l.y2)} stroke={ink} strokeOpacity={l.o.toFixed(2)} strokeWidth={r1(l.w)} strokeLinecap="round" />
+          ))}
+        </svg>
+        <div
+          style={{
+            position: "absolute",
+            left: pad,
+            top: pad,
+            display: "flex",
+            alignItems: "center",
+            gap: Math.round(S * 0.015),
+            height: Math.round(S * 0.085),
+            padding: `0 ${Math.round(S * 0.03)}px`,
+            borderRadius: 999,
+            background: dark ? "rgba(253,240,255,0.92)" : "rgba(11,13,16,0.86)",
+            color: a,
+            ...font("GeistMono"),
+            fontWeight: 600,
+            fontSize: r1(S * 0.036),
+            letterSpacing: "0.1em",
+          }}
+        >
+          <svg width={ic} height={ic} viewBox="0 0 64 64">
+            {MINI.map(([x1, y1, x2, y2]) => (
+              <line key={x1} x1={x1} y1={y1} x2={x2} y2={y2} stroke={a} strokeWidth={6} strokeLinecap="round" />
             ))}
-          </div>
-          <div style={{ flex: 1 }} />
-          <div
-            style={{
-              display: "flex",
-              ...font("Bricolage"),
-              fontWeight: 800,
-              fontSize: titleSize(name),
-              lineHeight: 1.02,
-              letterSpacing: "-0.03em",
-              color: ink,
-            }}
-          >
-            {name}
-          </div>
+          </svg>
+          AUTO
+        </div>
+        <div style={{ position: "absolute", left: pad, right: pad, bottom: pad, display: "flex", flexDirection: "column", gap: Math.round(S * 0.02), color: ink }}>
           {subtitle && (
-            <div style={{ display: "flex", marginTop: 26, ...font("Geist"), fontWeight: 600, fontSize: 40, color: soft }}>{subtitle}</div>
+            <div
+              style={{
+                display: "block",
+                ...font("GeistMono"),
+                fontWeight: 500,
+                fontSize: r1(S * 0.036),
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
+                opacity: 0.78,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {subtitle}
+            </div>
           )}
           <div
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 18,
-              marginTop: 56,
-              paddingTop: 30,
-              borderTop: `3px solid ${soft}`,
-              ...font("Geist"),
-              fontWeight: 600,
-              fontSize: 34,
-              letterSpacing: "0.14em",
-              color: soft,
+              display: "block",
+              ...font("Bricolage"),
+              fontWeight: 800,
+              fontSize: r1(S * 0.115),
+              lineHeight: 0.95,
+              letterSpacing: "-0.03em",
+              lineClamp: 2,
+              overflow: "hidden",
             }}
           >
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 5, height: 34 }}>
-              {[0.36, 0.55, 0.77, 1].map((h) => (
-                <div key={h} style={{ width: 8, height: 34 * h, borderRadius: 4, background: soft }} />
-              ))}
-            </div>
-            TIDAL PLAYLISTER
+            {name}
           </div>
         </div>
       </div>
@@ -147,4 +203,12 @@ export async function renderCover(name: string, subtitle = ""): Promise<Buffer> 
     },
   );
   return Buffer.from(await img.arrayBuffer());
+}
+
+// JPEG pleine taille (téléchargement) ou réduit à `width` px (affichage dans l'appli).
+export async function renderCover(name: string, subtitle = "", width = COVER_SIZE): Promise<Buffer> {
+  const png = await renderPng(name, subtitle);
+  const img = sharp(png);
+  if (width < COVER_SIZE) img.resize(width, width);
+  return img.jpeg({ quality: width < COVER_SIZE ? 82 : 90, mozjpeg: true }).toBuffer();
 }

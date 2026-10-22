@@ -17,7 +17,7 @@ export default function Nav() {
     <header className="border-b border-[#1b1f26] bg-night/70">
       <div className="mx-auto flex max-w-[1280px] flex-wrap items-center gap-x-7 gap-y-3 px-[clamp(16px,3vw,32px)] py-3">
         <Link href="/" className="flex min-h-11 items-center gap-2.5 text-ink no-underline">
-          <Logo id="nav-logo" />
+          <Logo />
           <Wordmark />
         </Link>
         <nav aria-label="Navigation principale" className="flex flex-wrap gap-1">

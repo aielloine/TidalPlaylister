@@ -1,56 +1,72 @@
-// Briques visuelles de l'identité « l'onde triée » (sans état : utilisables côté serveur comme client).
-import { coverGradient } from "@/lib/covers";
+// Briques visuelles de l'identité « Auto Playlister » (sans état : utilisables côté serveur comme client).
 
-export function Logo({ size = 32, id = "tp-logo" }: { size?: number; id?: string }) {
+// Arc « Crescendo » : 9 barres qui s'allongent en tournant, de l'aqua au lilas (viewBox 64, centre 32,32).
+const ARC: [number, number, number, number, string][] = [
+  [28.58, 41.4, 27.21, 45.16, "rgb(46,230,214)"],
+  [23.57, 37.37, 18.82, 40.4, "rgb(61,221,219)"],
+  [22.04, 31.13, 14.82, 30.5, "rgb(76,211,224)"],
+  [24.63, 25.24, 18.08, 19.25, "rgb(91,202,229)"],
+  [30.26, 22.15, 28.44, 11.81, "rgb(106,192,234)"],
+  [36.62, 23.13, 42.22, 12.37, "rgb(121,183,240)"],
+  [41.06, 27.77, 53.52, 21.96, "rgb(136,174,245)"],
+  [41.76, 34.16, 56.77, 37.49, "rgb(151,164,250)"],
+  [38.43, 39.66, 49.36, 52.68, "rgb(166,155,255)"],
+];
+
+// color : tuile sombre + dégradé ; mono : #eef1f5 sans tuile ; ink : encre sombre #071a1e sans tuile (sur dégradé).
+export type LogoVariant = "color" | "mono" | "ink";
+export function Logo({ size = 32, variant = "color", className = "" }: { size?: number; variant?: LogoVariant; className?: string }) {
+  const flat = variant === "mono" ? "#eef1f5" : variant === "ink" ? "#071a1e" : null;
   return (
-    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
-      <defs>
-        <linearGradient id={id} gradientUnits="userSpaceOnUse" x1="7" y1="24" x2="25" y2="8">
-          <stop offset="0" stopColor="#2ee6d6" />
-          <stop offset="1" stopColor="#a69bff" />
-        </linearGradient>
-      </defs>
-      <rect x="0.5" y="0.5" width="31" height="31" rx="9" fill="#14171c" stroke="#2a303a" />
-      <rect x="7" y="18" width="3" height="6" rx="1.5" fill={`url(#${id})`} />
-      <rect x="12" y="15" width="3" height="9" rx="1.5" fill={`url(#${id})`} />
-      <rect x="17" y="11.5" width="3" height="12.5" rx="1.5" fill={`url(#${id})`} />
-      <rect x="22" y="8" width="3" height="16" rx="1.5" fill={`url(#${id})`} />
+    <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true" className={`flex-none ${className}`}>
+      {variant === "color" && <rect x="1" y="1" width="62" height="62" rx="18" fill="#14171c" stroke="#2a303a" strokeWidth="1.5" />}
+      <g strokeWidth="4.6" strokeLinecap="round">
+        {ARC.map(([x1, y1, x2, y2, c]) => (
+          <line key={c} x1={x1} y1={y1} x2={x2} y2={y2} stroke={flat ?? c} />
+        ))}
+      </g>
     </svg>
   );
 }
 
 export function Wordmark({ size = 18 }: { size?: number }) {
   return (
-    <span className="font-display font-semibold tracking-tight" style={{ fontSize: size }}>
-      Tidal Playlister
+    <span className="font-display font-bold tracking-[-0.02em] text-ink" style={{ fontSize: size }}>
+      <span className="font-[450] text-dim">Auto</span> Playlister
     </span>
   );
 }
 
-// Sillons de vinyle par-dessus le dégradé.
-const RINGS =
-  "radial-gradient(circle at 105% 105%, transparent 0 34%, rgba(255,255,255,0.22) 34.5% 35.5%, transparent 36% 50%, rgba(255,255,255,0.16) 50.5% 51.5%, transparent 52%)";
+// Pochette générée (même rendu que le JPEG téléchargeable), réduite à la taille d'affichage.
+export const coverSrc = (name: string, sub = "", w?: number) =>
+  `/api/cover?name=${encodeURIComponent(name)}${sub ? `&sub=${encodeURIComponent(sub)}` : ""}${w ? `&w=${w}` : ""}`;
 
-// Pochette générée : dégradé dérivé du nom + 4 barres d'égaliseur rangées par taille.
-export function Cover({ name, size = 52, rings = false }: { name: string; size?: number; rings?: boolean }) {
-  const bar = Math.max(3, Math.round(size / 20));
+export function Cover({ name, sub = "", size = 52, className = "" }: { name: string; sub?: string; size?: number; className?: string }) {
+  // 2× pour les écrans haute densité, arrondi à un palier pour partager le cache.
+  const w = [64, 128, 256, 512].find((x) => x >= size * 2) ?? 1080;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- image générée par l'appli, pas d'optimiseur nécessaire
+    <img
+      src={coverSrc(name, sub, w)}
+      alt=""
+      width={size}
+      height={size}
+      loading="lazy"
+      className={`flex-none ${className}`}
+      style={{ width: size, height: size, borderRadius: Math.max(3, Math.round(size * 0.035)), boxShadow: size >= 80 ? "0 14px 30px -16px rgba(0,0,0,0.8)" : undefined }}
+    />
+  );
+}
+
+// Playlist non gérée par l'appli (aucun genre mappé) : pas de pochette générée, simple tuile neutre.
+export function PlainCover({ size = 52 }: { size?: number }) {
   return (
     <span
       aria-hidden="true"
-      className="flex flex-none items-end box-border"
-      style={{
-        width: size,
-        height: size,
-        borderRadius: Math.round(size * 0.18),
-        background: rings ? `${RINGS}, ${coverGradient(name)}` : coverGradient(name),
-        gap: Math.max(2, Math.round(size / 28)),
-        padding: Math.round(size * 0.15),
-        boxShadow: size >= 80 ? "0 14px 30px -16px rgba(0,0,0,0.8)" : undefined,
-      }}
+      className="flex flex-none items-center justify-center border border-line bg-tag text-faint"
+      style={{ width: size, height: size, borderRadius: Math.max(3, Math.round(size * 0.035)) }}
     >
-      {[0.09, 0.14, 0.19, 0.24].map((h) => (
-        <span key={h} style={{ width: bar, height: Math.round(size * h), borderRadius: 2, background: "rgba(11,13,16,0.5)" }} />
-      ))}
+      <Icon name="note" size={Math.max(12, Math.round(size * 0.4))} />
     </span>
   );
 }
@@ -168,6 +184,20 @@ const ICONS = {
       <path d="M3 3l18 18" />
       <path d="M10.6 6.1A10 10 0 0 1 22 12a17 17 0 0 1-3 3.6" />
       <path d="M6.6 6.6A17 17 0 0 0 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6" />
+    </>
+  ),
+  merge: (
+    <>
+      <path d="M6 4v4a6 6 0 0 0 6 6" />
+      <path d="M18 4v4a6 6 0 0 1-6 6v6" />
+      <path d="M9 17l3 3 3-3" />
+    </>
+  ),
+  download: (
+    <>
+      <path d="M12 4v11" />
+      <path d="M7 10l5 5 5-5" />
+      <path d="M5 20h14" />
     </>
   ),
   sparkles: (

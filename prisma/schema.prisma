@@ -49,14 +49,6 @@ model ProcessedTrack {
   byApp      Boolean  @default(true) // false : trouvé déjà dans la playlist, ou retiré à la main depuis ; on n'y touche plus
 }
 
-// Pochette générée appliquée à une playlist Tidal.
-model PlaylistCover {
-  playlistId String   @id
-  artworkId  String
-  name       String // nom de la playlist au moment de la génération : une pochette périmée est signalée
-  appliedAt  DateTime @default(now())
-}
-
 // Favoris restés non classés au dernier passage (dry run compris), avec leurs genres : alimente les
 // suggestions de playlists. Remplacé intégralement à chaque synchro terminée.
 model UnsortedTrack {

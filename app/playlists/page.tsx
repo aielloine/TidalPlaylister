@@ -1,8 +1,7 @@
 import { Alert, Button, Card } from "@mui/material";
 import {
   addMapping,
-  applyAllCovers,
-  applyCover,
+  applyIdeaTo,
   applyMood,
   applySuggestion,
   applySuggestions,
@@ -10,14 +9,16 @@ import {
   createPlaylist,
   deleteMapping,
   ignoreGenre,
+  mergePlaylists,
   saveIgnoredGenres,
   setMappingPriority,
 } from "@/app/actions";
+import AddToPlaylist from "@/components/AddToPlaylist";
 import GenrePicker from "@/components/GenrePicker";
 import IgnoredGenres from "@/components/IgnoredGenres";
 import MappingChip from "@/components/MappingChip";
 import UnmappedGenres from "@/components/UnmappedGenres";
-import { Cover, Icon, Mono, SectionTitle } from "@/components/ui";
+import { Cover, coverSrc, Icon, Mono, PlainCover, SectionTitle } from "@/components/ui";
 import { getSettings, prisma } from "@/lib/db";
 import { deezerGenreList } from "@/lib/deezer";
 import { parseList } from "@/lib/genres";
@@ -53,25 +54,8 @@ const LastfmNote = () => (
   </Alert>
 );
 
-// Aperçu servi par /api/cover (même rendu que l'image envoyée à Tidal).
-const coverUrl = (name: string, sub: string) => `/api/cover?${new URLSearchParams({ name, sub })}`;
-function CoverImg({ name, sub, size }: { name: string; sub: string; size: number }) {
-  return (
-    // eslint-disable-next-line @next/next/no-img-element -- image générée à la volée, pas d'optimisation utile
-    <img
-      src={coverUrl(name, sub)}
-      alt=""
-      width={size}
-      height={size}
-      loading="lazy"
-      className="flex-none bg-raised"
-      style={{ width: size, height: size, borderRadius: Math.round(size * 0.18) }}
-    />
-  );
-}
-
-export default async function Playlists({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
-  const { error: actionError } = await searchParams;
+export default async function Playlists({ searchParams }: { searchParams: Promise<{ error?: string; notice?: string }> }) {
+  const { error: actionError, notice } = await searchParams;
   if (!(await prisma.tidalToken.count()))
     return (
       <main className="mx-auto flex max-w-[1280px] flex-col gap-4 px-[clamp(16px,3vw,32px)] pb-16 pt-7">
@@ -115,22 +99,19 @@ export default async function Playlists({ searchParams }: { searchParams: Promis
   for (const p of playlists)
     await prisma.mapping.updateMany({ where: { playlistId: p.id, NOT: { playlistName: p.name } }, data: { playlistName: p.name } });
 
-  const [mappings, genres, settings, unsortedRows, coverRows] = await Promise.all([
+  const [mappings, genres, settings, unsortedRows] = await Promise.all([
     prisma.mapping.findMany({ orderBy: [{ priority: "desc" }, { genre: "asc" }] }),
     prisma.genre.findMany({ orderBy: { name: "asc" } }),
     getSettings(),
     prisma.unsortedTrack.findMany(),
-    prisma.playlistCover.findMany(),
   ]);
-  const covers = new Map(coverRows.map((c) => [c.playlistId, c]));
-  const managedPlaylists = playlists.filter((p) => mappings.some((m) => m.playlistId === p.id));
-  const coversToDo = managedPlaylists.filter((p) => covers.get(p.id)?.name !== p.name).length;
   const ignoredList = parseList(settings.ignoredGenres);
   const ignored = new Set(ignoredList);
   const mapped = new Set(mappings.map((m) => m.genre));
   const known = new Set(playlists.map((p) => p.id));
   const orphans = error ? [] : mappings.filter((m) => !known.has(m.playlistId));
   const playlistNames = new Set(playlists.map((p) => p.name.toLowerCase()));
+  const targets = playlists.map((p) => ({ id: p.id, name: p.name })); // « Ajouter à… »
   // Sous-titre de pochette d'une ambiance : ses tags libres ou déjà mappés vers elle (même ordre qu'à la création).
   const mappedTo = new Map(mappings.map((m) => [m.genre, m.playlistName.toLowerCase()]));
   const moodSub = (m: (typeof MOODS)[number]) =>
@@ -180,6 +161,7 @@ export default async function Playlists({ searchParams }: { searchParams: Promis
       </Header>
 
       {actionError && <Alert severity="error">{actionError}</Alert>}
+      {notice && <Alert severity="success">{notice}</Alert>}
       {error && <Alert severity="error">Lecture des playlists impossible : {error}</Alert>}
       {!ok(tidalGenres).length && !ok(deezer).length && (
         <Alert severity="warning">
@@ -194,7 +176,7 @@ export default async function Playlists({ searchParams }: { searchParams: Promis
         </Alert>
       )}
 
-      {top.length > 0 && <Suggestions top={top} rest={suggestions.slice(TOP_SUGGESTIONS)} unsortedCount={unsorted.length} />}
+      {top.length > 0 && <Suggestions top={top} rest={suggestions.slice(TOP_SUGGESTIONS)} unsortedCount={unsorted.length} targets={targets} />}
 
       {unmapped.length > 0 && (
         <Card component="section" aria-labelledby="unmapped-title" className="flex flex-col gap-3.5 p-[22px]">
@@ -205,7 +187,15 @@ export default async function Playlists({ searchParams }: { searchParams: Promis
             </div>
             <span className="text-[13px] text-muted">Rencontrés pendant les synchros. Cliquez sur un genre pour l&apos;associer à une playlist.</span>
           </div>
-          <UnmappedGenres genres={unmapped} playlists={playlists} assign={assignGenre} ignore={ignoreGenre} />
+          <UnmappedGenres
+            genres={unmapped}
+            playlists={playlists.map((p) => {
+              const own = mappings.filter((m) => m.playlistId === p.id);
+              return { ...p, sub: own.length ? coverSub(own) : null };
+            })}
+            assign={assignGenre}
+            ignore={ignoreGenre}
+          />
         </Card>
       )}
 
@@ -214,7 +204,8 @@ export default async function Playlists({ searchParams }: { searchParams: Promis
           <div className="flex flex-col gap-1">
             <SectionTitle id="moods-title">Playlists d&apos;ambiance</SectionTitle>
             <p className="m-0 text-[13.5px] text-muted">
-              Un clic crée la playlist (ou réutilise celle du même nom) et y mappe les tags encore libres.
+              Un clic crée la playlist (ou réutilise celle du même nom) et y mappe les tags encore libres. « Ajouter à… » les met plutôt dans une
+              playlist existante.
             </p>
           </div>
           <ul className="tp-scroll m-0 flex max-h-[560px] list-none flex-col gap-1 overflow-auto p-0">
@@ -222,8 +213,8 @@ export default async function Playlists({ searchParams }: { searchParams: Promis
               const exists = playlistNames.has(m.name.toLowerCase());
               return (
                 <li key={m.name}>
-                  <form action={applyMood.bind(null, i)} className="flex items-center gap-3.5 rounded-[14px] bg-raised p-2.5">
-                    <CoverImg name={m.name} sub={moodSub(m)} size={52} />
+                  <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 rounded-[14px] bg-raised p-2.5">
+                    <Cover name={m.name} sub={moodSub(m)} size={52} />
                     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-[15px] font-semibold">{m.name}</span>
@@ -233,10 +224,15 @@ export default async function Playlists({ searchParams }: { searchParams: Promis
                       </div>
                       <span className="truncate text-[12.5px] text-muted">{moodTags(m).map(([t]) => t).join(", ")}</span>
                     </div>
-                    <Button type="submit" size="small" variant={exists ? "outlined" : "contained"} color={exists ? "inherit" : "primary"} sx={{ boxShadow: "none" }}>
-                      {exists ? "Compléter" : "Créer"}
-                    </Button>
-                  </form>
+                    <div className="ml-auto flex items-center gap-2">
+                      <form action={applyMood.bind(null, i)} aria-label={`${exists ? "Compléter" : "Créer"} ${m.name}`}>
+                        <Button type="submit" size="small" variant={exists ? "outlined" : "contained"} color={exists ? "inherit" : "primary"} sx={{ boxShadow: "none" }}>
+                          {exists ? "Compléter" : "Créer"}
+                        </Button>
+                      </form>
+                      <AddToPlaylist action={applyIdeaTo.bind(null, `mood:${i}`)} playlists={targets} label={`Ajouter « ${m.name} » à une playlist existante`} />
+                    </div>
+                  </div>
                 </li>
               );
             })}
@@ -259,58 +255,42 @@ export default async function Playlists({ searchParams }: { searchParams: Promis
         <h2 className="m-0 font-display text-[26px] font-bold tracking-[-0.02em]">
           Mes playlists Tidal <span className="font-medium text-faint">· {playlists.length}</span>
         </h2>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <span className="text-[13px] text-muted">Priorité : cliquez sur le nombre pour la modifier</span>
-          {coversToDo > 0 && (
-            <form action={applyAllCovers}>
-              <Button type="submit" size="small" variant="outlined" color="secondary" startIcon={<Icon name="sparkles" size={16} />}>
-                Pochettes générées pour {plural(coversToDo, "playlist gérée", "playlists gérées")}
-              </Button>
-            </form>
-          )}
-        </div>
+        <span className="text-[13px] text-muted">Priorité : cliquez sur le nombre pour la modifier</span>
       </div>
+
+      {playlists.length > 1 && (
+        <MergeForm
+          playlists={playlists.map((p) => {
+            const own = mappings.filter((m) => m.playlistId === p.id);
+            return { ...p, sub: own.length ? coverSub(own) : null };
+          })}
+        />
+      )}
 
       <div className="grid grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))] gap-4">
         {playlists.map((p) => {
           const own = mappings.filter((m) => m.playlistId === p.id);
-          const cover = covers.get(p.id);
           const sub = coverSub(own);
           return (
             <Card component="article" key={p.id} className="flex flex-col gap-4 p-[18px]">
               <div className="flex items-center gap-3.5">
-                {/* eslint-disable-next-line @next/next/no-img-element -- image générée à la volée, pas d'optimisation utile */}
-                <img
-                  src={coverUrl(p.name, sub)}
-                  alt=""
-                  width={84}
-                  height={84}
-                  loading="lazy"
-                  className="size-[84px] flex-none rounded-[15px] bg-raised shadow-[0_14px_30px_-16px_rgba(0,0,0,0.8)]"
-                />
+                {own.length ? <Cover name={p.name} sub={sub} size={84} /> : <PlainCover size={84} />}
                 <div className="flex min-w-0 flex-col gap-1">
                   <h3 className="m-0 font-display text-xl font-semibold leading-[1.15] tracking-tight">{p.name}</h3>
                   <span className="text-[13px] text-muted">
                     {plural(p.tracks, "titre")} · {own.length ? plural(own.length, "genre") : "aucun genre"}
                   </span>
-                  <form action={applyCover.bind(null, p.id, p.name)}>
-                    {cover?.name === p.name ? (
-                      <span className="inline-flex items-center gap-1.5 text-xs text-[#6ee7a0]">
-                        Pochette générée sur Tidal
-                        <button type="submit" className="cursor-pointer border-0 bg-transparent p-0 text-xs text-muted underline underline-offset-2 hover:text-ink">
-                          régénérer
-                        </button>
-                      </span>
-                    ) : (
-                      <button
-                        type="submit"
-                        className="inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-xs font-semibold text-lilac-soft hover:text-ink"
-                      >
-                        <Icon name="sparkles" size={13} />
-                        {cover ? "Mettre à jour la pochette (playlist renommée)" : "Appliquer la pochette générée"}
-                      </button>
-                    )}
-                  </form>
+                  {own.length > 0 && (
+                    <a
+                      href={`${coverSrc(p.name, sub)}&download=1`}
+                      download
+                      title="Tidal ne permet pas aux applis tierces d'envoyer une pochette : téléchargez-la puis ajoutez-la à la playlist depuis l'appli Tidal."
+                      className="inline-flex items-center gap-1 self-start text-xs font-semibold text-lilac-soft no-underline hover:text-ink"
+                    >
+                      <Icon name="download" size={13} strokeWidth={2} />
+                      Télécharger la pochette
+                    </a>
+                  )}
                 </div>
               </div>
               {own.length ? (
@@ -360,7 +340,8 @@ export default async function Playlists({ searchParams }: { searchParams: Promis
 }
 
 // Idées de playlists classées par nombre de favoris non classés qu'elles rangeraient.
-function Suggestions({ top, rest, unsortedCount }: { top: Suggestion[]; rest: Suggestion[]; unsortedCount: number }) {
+type Target = { id: string; name: string };
+function Suggestions({ top, rest, unsortedCount, targets }: { top: Suggestion[]; rest: Suggestion[]; unsortedCount: number; targets: Target[] }) {
   return (
     <section
       aria-labelledby="ideas-title"
@@ -377,8 +358,8 @@ function Suggestions({ top, rest, unsortedCount }: { top: Suggestion[]; rest: Su
             {plural(unsortedCount, "favori")} attendent une playlist
           </h2>
           <p className="m-0 text-[14px] text-dim">
-            D&apos;après les genres de vos favoris non classés. Un clic crée la playlist sur Tidal (ou complète celle du même nom) et y mappe les tags : ils
-            seront rangés à la prochaine synchro.
+            D&apos;après les genres de vos favoris non classés. Un clic crée la playlist sur Tidal (ou complète celle du même nom) et y mappe les tags ;
+            « Ajouter à… » les met dans une playlist existante. Les titres sont rangés à la prochaine synchro.
           </p>
         </div>
         <form action={applySuggestions}>
@@ -394,9 +375,9 @@ function Suggestions({ top, rest, unsortedCount }: { top: Suggestion[]; rest: Su
       <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(min(300px,100%),1fr))] gap-3 p-0">
         {top.map((s) => (
           <li key={s.key}>
-            <form action={applySuggestion.bind(null, s.key)} className="flex h-full flex-col gap-3 rounded-[18px] border border-edge bg-stage p-4">
+            <div className="flex h-full flex-col gap-3 rounded-[18px] border border-edge bg-stage p-4">
               <div className="flex items-center gap-3">
-                <CoverImg name={s.name} sub={s.coverSub} size={56} />
+                <Cover name={s.name} sub={s.coverSub} size={56} />
                 <div className="flex min-w-0 flex-col gap-0.5">
                   <span className="truncate font-display text-[17px] font-semibold tracking-tight">{s.name}</span>
                   <span className="text-[13px]">
@@ -420,10 +401,20 @@ function Suggestions({ top, rest, unsortedCount }: { top: Suggestion[]; rest: Su
                   </li>
                 ))}
               </ul>
-              <Button type="submit" size="small" variant={s.exists ? "outlined" : "contained"} color={s.exists ? "inherit" : "primary"} sx={{ mt: "auto", boxShadow: "none" }}>
-                {s.exists ? "Compléter" : "Créer"} « {s.name} »
-              </Button>
-            </form>
+              <div className="mt-auto flex flex-col gap-2">
+                <form action={applySuggestion.bind(null, s.key)} className="flex">
+                  <Button type="submit" size="small" fullWidth variant={s.exists ? "outlined" : "contained"} color={s.exists ? "inherit" : "primary"} sx={{ boxShadow: "none" }}>
+                    {s.exists ? "Compléter" : "Créer"} « {s.name} »
+                  </Button>
+                </form>
+                <AddToPlaylist
+                  action={applyIdeaTo.bind(null, s.key)}
+                  playlists={targets}
+                  label={`Ajouter « ${s.name} » à une playlist existante`}
+                  selectClassName="w-full max-w-none"
+                />
+              </div>
+            </div>
           </li>
         ))}
       </ul>
@@ -437,21 +428,86 @@ function Suggestions({ top, rest, unsortedCount }: { top: Suggestion[]; rest: Su
           <ul className="m-0 mt-3 flex list-none flex-col gap-1 p-0">
             {rest.map((s) => (
               <li key={s.key}>
-                <form action={applySuggestion.bind(null, s.key)} className="flex items-center gap-3 rounded-xl p-1.5 hover:bg-raised">
-                  <CoverImg name={s.name} sub={s.coverSub} size={36} />
+                <div className="flex items-center gap-3 rounded-xl p-1.5 hover:bg-raised">
+                  <Cover name={s.name} sub={s.coverSub} size={36} />
                   <span className="min-w-0 flex-1 truncate text-sm font-medium">
                     {s.name} <Mono className="text-xs text-faint">· {s.count}</Mono>
                   </span>
                   <span className="hidden min-w-0 flex-1 truncate text-xs text-muted sm:block">{s.tags.slice(0, 4).join(", ")}</span>
-                  <Button type="submit" size="small" variant="outlined" color="inherit">
-                    {s.exists ? "Compléter" : "Créer"}
-                  </Button>
-                </form>
+                  <form action={applySuggestion.bind(null, s.key)} aria-label={`${s.exists ? "Compléter" : "Créer"} ${s.name}`}>
+                    <Button type="submit" size="small" variant="outlined" color="inherit">
+                      {s.exists ? "Compléter" : "Créer"}
+                    </Button>
+                  </form>
+                  <AddToPlaylist action={applyIdeaTo.bind(null, s.key)} playlists={targets} label={`Ajouter « ${s.name} » à une playlist existante`} className="max-sm:hidden" />
+                </div>
               </li>
             ))}
           </ul>
         </details>
       )}
     </section>
+  );
+}
+
+// Fusion de playlists : sources cochées → cible. Formulaire natif (fonctionne sans JS).
+function MergeForm({ playlists }: { playlists: (Playlist & { sub: string | null })[] }) {
+  return (
+    <details className="group rounded-[18px] border border-edge bg-stage">
+      <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2.5 px-[18px] text-[14.5px] font-semibold text-soft hover:text-ink">
+        <Icon name="merge" size={17} />
+        Fusionner des playlists
+        <span className="ml-auto text-xs font-normal text-muted group-open:hidden">Regrouper plusieurs playlists en une seule</span>
+      </summary>
+      <form action={mergePlaylists} aria-label="Fusionner des playlists" className="flex flex-col gap-4 border-t border-edge p-[18px]">
+        <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
+          <legend className="mb-2 p-0 text-[13px] font-semibold text-soft">Playlists à fusionner</legend>
+          <div className="flex flex-wrap gap-2">
+            {playlists.map((p) => (
+              <label
+                key={p.id}
+                className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-full border border-[#2a303a] pl-1.5 pr-3.5 text-[13.5px] text-soft hover:border-[#3a414c] has-[:checked]:border-aqua has-[:checked]:bg-aqua/12 has-[:checked]:font-semibold has-[:checked]:text-aqua has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-aqua"
+              >
+                <input type="checkbox" name="source" value={p.id} className="sr-only" />
+                {p.sub === null ? <PlainCover size={28} /> : <Cover name={p.name} sub={p.sub} size={28} />}
+                {p.name}
+                <span className="font-mono text-[11.5px] font-normal text-faint">{p.tracks}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
+          <label className="flex flex-col gap-2 text-[13px] font-semibold text-soft">
+            Dans la playlist
+            <select
+              name="target"
+              required
+              defaultValue=""
+              className="h-11 min-w-[220px] cursor-pointer rounded-xl border border-[#2a303a] bg-hollow px-3 text-[14px] font-normal text-ink outline-none focus:border-aqua [&>option]:bg-stage"
+            >
+              <option value="" disabled>
+                Choisir la cible…
+              </option>
+              {playlists.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex min-h-11 cursor-pointer items-center gap-2.5 text-[13.5px] text-soft">
+            <input type="checkbox" name="deleteSources" className="size-4 accent-[#ff6b6b]" />
+            Supprimer ensuite les playlists fusionnées sur Tidal
+          </label>
+          <Button type="submit" variant="contained" color="inherit" sx={{ ml: "auto", bgcolor: "#eef1f5", color: "#0b0d10", "&:hover": { bgcolor: "#ffffff" } }}>
+            Fusionner
+          </Button>
+        </div>
+        <p className="m-0 text-[12.5px] leading-normal text-muted">
+          Les titres sont copiés dans la cible sans doublon, et les genres mappés des playlists fusionnées passent sur la cible. Sans suppression, les
+          playlists d&apos;origine restent intactes sur Tidal mais ne sont plus gérées.
+        </p>
+      </form>
+    </details>
   );
 }
