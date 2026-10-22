@@ -44,10 +44,13 @@ Sur `/playlists` :
 - **Fusionner des playlists** : les titres des playlists cochées sont copiés dans la cible (sans doublon), leurs
   genres mappés et le suivi des titres déjà classés passent sur la cible ; les sources peuvent ensuite être
   supprimées sur Tidal (option, désactivée par défaut).
-- Un clic sur un **genre détecté non mappé** permet de l'associer à une playlist ou de l'ignorer.
+- **Genres détectés non mappés** (repliés derrière un bouton) : un clic sur un genre affiche des exemples à écouter,
+  puis permet de l'associer à une playlist ou de l'ignorer.
+- **Exemples à écouter** sur chaque idée et chaque ambiance : d'abord vos titres portant ces genres, puis des titres
+  connus du genre (Last.fm `tag.getTopTracks`, sinon une playlist Deezer), avec leur extrait de 30 s.
 - **Pochettes générées** : chaque playlist gérée (au moins un genre mappé) a sa pochette JPEG 1080 × 1080 : dégradé
-  de sa famille de genres, arc Crescendo, badge AUTO, ses 3 genres principaux et son nom. Elle s'affiche partout
-  dans l'appli et se **télécharge** depuis la carte de la playlist : l'API Tidal refuse l'envoi de pochettes aux
+  de sa famille de genres, arc Crescendo, badge AUTO, ses 3 genres principaux et son nom (PNG si sharp, fourni
+  avec Next, est introuvable). Elle s'affiche partout dans l'appli et se **télécharge** depuis la carte de la playlist : l'API Tidal refuse l'envoi de pochettes aux
   applis tierces (`POST /artworks` → 403 « Access tier is insufficient »), il faut donc l'ajouter à la main depuis
   l'appli Tidal. Polices (Bricolage Grotesque, Geist Mono — OFL) téléchargées une fois depuis jsdelivr dans
   `data/fonts` ; à défaut, police par défaut.

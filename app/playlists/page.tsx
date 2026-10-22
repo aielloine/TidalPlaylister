@@ -14,6 +14,7 @@ import {
   setMappingPriority,
 } from "@/app/actions";
 import AddToPlaylist from "@/components/AddToPlaylist";
+import { Examples } from "@/components/Preview";
 import GenrePicker from "@/components/GenrePicker";
 import IgnoredGenres from "@/components/IgnoredGenres";
 import MappingChip from "@/components/MappingChip";
@@ -179,24 +180,31 @@ export default async function Playlists({ searchParams }: { searchParams: Promis
       {top.length > 0 && <Suggestions top={top} rest={suggestions.slice(TOP_SUGGESTIONS)} unsortedCount={unsorted.length} targets={targets} />}
 
       {unmapped.length > 0 && (
-        <Card component="section" aria-labelledby="unmapped-title" className="flex flex-col gap-3.5 p-[22px]">
-          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1.5">
-            <div className="flex items-center gap-2.5">
-              <SectionTitle id="unmapped-title">Genres détectés non mappés</SectionTitle>
-              <span className="inline-flex h-6 items-center rounded-full bg-amber/13 px-2.5 font-mono text-[12.5px] font-semibold text-amber">{unmapped.length}</span>
-            </div>
-            <span className="text-[13px] text-muted">Rencontrés pendant les synchros. Cliquez sur un genre pour l&apos;associer à une playlist.</span>
+        <details className="group rounded-[18px] border border-edge bg-stage">
+          <summary className="flex min-h-12 cursor-pointer list-none flex-wrap items-center gap-x-2.5 gap-y-1 px-[18px] py-2 text-[14.5px] font-semibold text-soft hover:text-ink">
+            <Icon name="plus" size={15} strokeWidth={2.2} className="transition-transform group-open:rotate-45" />
+            <span id="unmapped-title">Genres détectés non mappés</span>
+            <span className="inline-flex h-6 items-center rounded-full bg-amber/13 px-2.5 font-mono text-[12.5px] font-semibold text-amber">{unmapped.length}</span>
+            <span className="ml-auto text-xs font-normal text-muted">
+              <span className="group-open:hidden">Afficher</span>
+              <span className="hidden group-open:inline">Masquer</span>
+            </span>
+          </summary>
+          <div className="flex flex-col gap-3 border-t border-edge p-[18px]">
+            <span className="text-[13px] text-muted">
+              Rencontrés pendant les synchros. Cliquez sur un genre pour écouter des exemples, l&apos;associer à une playlist ou l&apos;ignorer.
+            </span>
+            <UnmappedGenres
+              genres={unmapped}
+              playlists={playlists.map((p) => {
+                const own = mappings.filter((m) => m.playlistId === p.id);
+                return { ...p, sub: own.length ? coverSub(own) : null };
+              })}
+              assign={assignGenre}
+              ignore={ignoreGenre}
+            />
           </div>
-          <UnmappedGenres
-            genres={unmapped}
-            playlists={playlists.map((p) => {
-              const own = mappings.filter((m) => m.playlistId === p.id);
-              return { ...p, sub: own.length ? coverSub(own) : null };
-            })}
-            assign={assignGenre}
-            ignore={ignoreGenre}
-          />
-        </Card>
+        </details>
       )}
 
       <div className="flex flex-wrap items-stretch gap-4">
@@ -223,6 +231,7 @@ export default async function Playlists({ searchParams }: { searchParams: Promis
                         {count > 0 && <span className="text-xs font-semibold text-amber">· {plural(count, "favori")} à ranger</span>}
                       </div>
                       <span className="truncate text-[12.5px] text-muted">{moodTags(m).map(([t]) => t).join(", ")}</span>
+                      <Examples tags={moodTags(m).map(([t]) => t)} className="mt-1" />
                     </div>
                     <div className="ml-auto flex items-center gap-2">
                       <form action={applyMood.bind(null, i)} aria-label={`${exists ? "Compléter" : "Créer"} ${m.name}`}>
@@ -401,6 +410,7 @@ function Suggestions({ top, rest, unsortedCount, targets }: { top: Suggestion[];
                   </li>
                 ))}
               </ul>
+              <Examples tags={s.tags} />
               <div className="mt-auto flex flex-col gap-2">
                 <form action={applySuggestion.bind(null, s.key)} className="flex">
                   <Button type="submit" size="small" fullWidth variant={s.exists ? "outlined" : "contained"} color={s.exists ? "inherit" : "primary"} sx={{ boxShadow: "none" }}>

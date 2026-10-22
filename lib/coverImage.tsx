@@ -1,16 +1,29 @@
 // Pochettes générées (JPEG 1080 × 1080) des playlists gérées : dégradé de la famille de genres, halo, arc
 // Crescendo fixe (signature), badge AUTO, 3 genres en mono et nom en Bricolage Grotesque.
+import { realpathSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { ImageResponse } from "next/og";
 import { coverColors } from "./covers";
 
-// sharp (encodage JPEG, réduction) est déjà installé avec Next, qui s'en sert pour next/image et l'embarque dans la
-// sortie standalone : on le charge depuis le dossier de next plutôt que d'en faire une dépendance de plus.
-type SharpImage = { resize(w: number, h: number): SharpImage; jpeg(o: { quality: number; mozjpeg?: boolean }): SharpImage; toBuffer(): Promise<Buffer> };
-const gs = globalThis as unknown as { sharp?: (input: Buffer) => SharpImage };
-const sharp = (input: Buffer) => (gs.sharp ??= createRequire(join(process.cwd(), "node_modules", "next", "package.json"))("sharp"))(input);
+// sharp (encodage JPEG) est installé avec Next, qui s'en sert pour next/image : on le charge depuis le dossier de
+// next plutôt que d'en faire une dépendance de plus. Introuvable (image Docker sans lui…) : pochettes en PNG.
+type SharpImage = { jpeg(o: { quality: number; mozjpeg?: boolean }): SharpImage; toBuffer(): Promise<Buffer> };
+type Sharp = (input: Buffer) => SharpImage;
+const gs = globalThis as unknown as { sharp?: Sharp | null };
+function loadSharp(): Sharp | null {
+  if (gs.sharp !== undefined) return gs.sharp;
+  const nextPkg = join(process.cwd(), "node_modules", "next", "package.json");
+  const from = [() => realpathSync(nextPkg), () => nextPkg, () => join(process.cwd(), "package.json")];
+  for (const f of from) {
+    try {
+      return (gs.sharp = createRequire(f())("sharp") as Sharp);
+    } catch {}
+  }
+  console.warn("[cover] sharp introuvable : pochettes servies en PNG");
+  return (gs.sharp = null);
+}
 
 export const COVER_SIZE = 1080;
 
@@ -105,14 +118,13 @@ const MINI: [number, number, number, number][] = [
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
 // subtitle : quelques genres de la playlist (ex. « french house · nu disco · chillwave »).
-async function renderPng(name: string, subtitle: string): Promise<Buffer> {
+async function renderPng(name: string, subtitle: string, S: number): Promise<Buffer> {
   const [a, b] = coverColors(name);
   const dark = luminance(a) < 0.1; // dégradé sombre (ex. synthwave) : encre claire, badge inversé
   const ink = dark ? "#fdf0ff" : "#0b0d10";
   const fontList = await fonts();
   // Police absente (téléchargement impossible) : propriété omise, une valeur undefined fait planter le rendu.
   const font = (n: FontName) => (fontList.some((f) => f.name === n) ? { fontFamily: n } : {});
-  const S = COVER_SIZE;
   const pad = Math.round(S * 0.07);
   const ic = Math.round(S * 0.05);
 
@@ -205,10 +217,11 @@ async function renderPng(name: string, subtitle: string): Promise<Buffer> {
   return Buffer.from(await img.arrayBuffer());
 }
 
-// JPEG pleine taille (téléchargement) ou réduit à `width` px (affichage dans l'appli).
-export async function renderCover(name: string, subtitle = "", width = COVER_SIZE): Promise<Buffer> {
-  const png = await renderPng(name, subtitle);
-  const img = sharp(png);
-  if (width < COVER_SIZE) img.resize(width, width);
-  return img.jpeg({ quality: width < COVER_SIZE ? 82 : 90, mozjpeg: true }).toBuffer();
+// Pochette carrée de `width` px, dessinée directement à cette taille (tout est proportionnel). Pleine taille : JPEG
+// (téléchargement) si sharp est là ; vignettes de l'interface : PNG, pas besoin d'encodeur.
+export async function renderCover(name: string, subtitle = "", width = COVER_SIZE): Promise<{ data: Buffer; type: "image/jpeg" | "image/png" }> {
+  const png = await renderPng(name, subtitle, width);
+  const sharp = width >= COVER_SIZE ? loadSharp() : null;
+  if (!sharp) return { data: png, type: "image/png" };
+  return { data: await sharp(png).jpeg({ quality: 90, mozjpeg: true }).toBuffer(), type: "image/jpeg" };
 }

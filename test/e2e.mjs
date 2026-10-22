@@ -59,9 +59,11 @@ const fake = createServer(async (req, res) => {
     lastfmCalls.push(`${method}:${url.searchParams.get("track") ?? url.searchParams.get("artist")}`);
     if (method === "track.gettoptags") return json({ toptags: { tag: lastfmTracks[url.searchParams.get("track")] ?? [] } });
     if (method === "artist.gettoptags") return json({ toptags: { tag: { name: "Artist Tag", count: 100 } } }); // objet seul
+    if (method === "tag.gettoptracks") return json({ tracks: { track: [{ name: "Hit", artist: { name: "Star" } }] } });
   }
   if (p === "/deezer/album/55") return json({ id: 55, genres: { data: [{ id: 2, name: "Reggae" }] } });
-  if (p === "/deezer/search") return json({ data: [] });
+  if (p === "/deezer/search")
+    return json({ data: url.searchParams.get("q").includes("Star") ? [{ id: 9, preview: "https://cdn.test/star.mp3", link: "https://deezer.test/9" }] : [] });
   if (p === "/deezer/genre") return json({ data: [{ id: 0, name: "All" }, { id: 1, name: "Pop" }, { id: 2, name: "Reggae" }] });
 
   if (p === "/token") return json({ access_token: "AT", refresh_token: "RT", expires_in: 3600 });
@@ -177,6 +179,7 @@ const env = {
   PORT: "3999",
   HOSTNAME: "127.0.0.1",
   HTTP_RETRY_DELAYS_MS: "50,50",
+  NODE_PATH: "", // comme dans l'image Docker : pas de modules globaux (sharp doit venir de next)
   COVER_FONT_CDN: "", // pas de téléchargement de police en test : police par défaut de next/og
 };
 execFileSync("node", ["migrate.mjs"], { env, stdio: "inherit" });
@@ -387,7 +390,9 @@ try {
   assert.match(jpg.headers.get("content-disposition"), /attachment; filename="electro-chill\.jpg"/);
   const bytes = Buffer.from(await jpg.arrayBuffer());
   assert.deepEqual([...bytes.subarray(0, 3)], [0xff, 0xd8, 0xff]);
-  const thumb = Buffer.from(await (await http(`/api/cover?name=Rock&w=64`)).arrayBuffer());
+  const thumbRes = await http(`/api/cover?name=Rock&w=64`);
+  assert.equal(thumbRes.headers.get("content-type"), "image/png"); // vignette dessinée à sa taille, sans encodeur
+  const thumb = Buffer.from(await thumbRes.arrayBuffer());
   assert.ok(thumb.length < bytes.length / 4, "vignette réduite");
   assert.equal(state.artworkCalls, 0);
 
@@ -417,6 +422,12 @@ try {
   await waitIdle();
   assert.doesNotMatch(await page("/"), /Song (Four|Five) (→|—)/);
   assert.deepEqual(state.added.p1, ["t9", "t4", "t5"]);
+
+  // Exemples à écouter : d'abord vos titres portant le genre, puis des titres connus (Last.fm + extrait Deezer)
+  const ex = (await (await http("/api/examples?tag=Reggae")).json()).examples;
+  assert.deepEqual(ex.map((e) => [e.trackId ?? null, e.mine, e.preview?.url ?? null]), [["t5", true, null], [null, false, "https://cdn.test/star.mp3"]]);
+  assert.equal(ex[1].label, "Star — Hit");
+  assert.match(await page("/playlists"), /Écouter des exemples/);
 
   // Extraits audio des logs
   assert.match(dash, /aria-label="Écouter un extrait \(30 s\)"/);
