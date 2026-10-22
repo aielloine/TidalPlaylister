@@ -8,7 +8,7 @@ const cache = (g.coverPreviews ??= new Map());
 const WIDTHS = [64, 128, 256, 512];
 
 const fileName = (name: string) =>
-  name.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase() || "pochette";
+  name.normalize("NFD").replace(/\p{M}/gu, "").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase() || "pochette";
 
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams;
