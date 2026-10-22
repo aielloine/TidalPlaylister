@@ -2,6 +2,7 @@
 
 import { Popover } from "@mui/material";
 import { useState } from "react";
+import { ExampleList } from "@/components/Preview";
 import { Cover, Icon, PlainCover } from "@/components/ui";
 
 type Genre = { name: string; count: number };
@@ -54,10 +55,14 @@ export default function UnmappedGenres({
         onClose={close}
         anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
         transformOrigin={{ vertical: "top", horizontal: "left" }}
-        slotProps={{ paper: { sx: { mt: 1, width: 330, p: 1.75 }, role: "dialog", "aria-label": `Associer ${anchor?.genre ?? ""} à une playlist` } }}
+        slotProps={{ paper: { sx: { mt: 1, width: 360, maxWidth: "calc(100vw - 32px)", p: 1.75 }, role: "dialog", "aria-label": `Associer ${anchor?.genre ?? ""} à une playlist` } }}
       >
         {anchor && (
           <div className="flex flex-col gap-2.5">
+            <div className="flex flex-col gap-1 border-b border-[#2a303a] pb-2.5">
+              <span className="text-[12px] font-semibold uppercase tracking-[0.1em] text-muted">Exemples · {anchor.genre}</span>
+              <ExampleList tags={[anchor.genre]} />
+            </div>
             <span className="text-[13px] text-dim">
               Associer <strong className="font-semibold text-ink">{anchor.genre}</strong> à…
             </span>

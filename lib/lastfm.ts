@@ -58,3 +58,20 @@ export async function lastfmTags(artist: string, title: string): Promise<string[
   const artistTags = await cached(`a:${a}`, { method: "artist.gettoptags", artist });
   return [...new Set([...tags, ...artistTags])];
 }
+
+// Titres les plus écoutés pour un tag (exemples d'un genre ou d'une ambiance). [] si Last.fm est désactivé.
+export async function lastfmTagTracks(tag: string, limit = 5): Promise<{ artist: string; title: string }[]> {
+  if (!lastfmEnabled()) return [];
+  const url = new URL(API);
+  url.search = new URLSearchParams({ method: "tag.gettoptracks", tag, limit: String(limit), api_key: process.env.LASTFM_API_KEY!, format: "json" }).toString();
+  try {
+    const d = await (await fetch(url, { signal: AbortSignal.timeout(10_000) })).json();
+    return ([] as { name: string; artist?: { name?: string } }[])
+      .concat(d.tracks?.track ?? [])
+      .map((t) => ({ artist: t.artist?.name ?? "", title: t.name }))
+      .filter((t) => t.title);
+  } catch (e) {
+    console.warn("[lastfm] tag.gettoptracks :", (e as Error).message);
+    return [];
+  }
+}

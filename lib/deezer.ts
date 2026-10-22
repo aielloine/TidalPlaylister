@@ -77,3 +77,12 @@ export async function deezerPreview(isrc: string | undefined, artist: string, ti
   previews.set(key, { at: Date.now(), p });
   return p;
 }
+
+// Sans Last.fm : titres de la première playlist Deezer trouvée pour ce genre (exemples à écouter).
+export async function deezerTagTracks(tag: string, limit = 5): Promise<{ artist: string; title: string; preview: Preview | null }[]> {
+  const pl = await get(`/search/playlist?${new URLSearchParams({ q: tag, limit: "1" })}`);
+  const id = pl.data?.[0]?.id;
+  if (!id) return [];
+  const t = await get(`/playlist/${id}/tracks?limit=${limit}`);
+  return ((t.data ?? []) as any[]).map((x) => ({ artist: x.artist?.name ?? "", title: x.title ?? "", preview: toPreview(x) }));
+}
