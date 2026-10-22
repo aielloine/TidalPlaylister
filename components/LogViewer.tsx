@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
+import { PlayButton } from "@/components/Preview";
 import { Cover, Icon } from "@/components/ui";
 
 export type LogLine = { id: number; time: string; level: string; message: string; trackId?: string | null };
@@ -65,67 +66,10 @@ const PlaylistChip = ({ name }: { name: string }) => (
   </span>
 );
 
-type PlayState = { trackId: string; status: "loading" | "playing" | "error"; error?: string } | null;
-
-// Extrait de 30 s (Deezer) : un seul lecteur pour toute la liste.
-function usePreview() {
-  const audio = useRef<HTMLAudioElement | null>(null);
-  const [state, setState] = useState<PlayState>(null);
-  useEffect(() => () => audio.current?.pause(), []);
-  async function toggle(trackId: string) {
-    const a = (audio.current ??= new Audio());
-    if (state?.trackId === trackId && state.status !== "error") {
-      a.pause();
-      setState(null);
-      return;
-    }
-    a.pause();
-    setState({ trackId, status: "loading" });
-    try {
-      const res = await fetch(`/api/preview/${encodeURIComponent(trackId)}`);
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
-      a.src = body.url;
-      a.onended = () => setState(null);
-      await a.play();
-      setState({ trackId, status: "playing" });
-    } catch (e) {
-      setState({ trackId, status: "error", error: (e as Error).message });
-    }
-  }
-  return { state, toggle };
-}
-
-function PlayButton({ trackId, state, toggle }: { trackId: string; state: PlayState; toggle: (id: string) => void }) {
-  const mine = state?.trackId === trackId ? state : null;
-  const label = mine?.status === "playing" ? "Arrêter l'extrait" : mine?.status === "error" ? `Extrait indisponible : ${mine.error}` : "Écouter un extrait (30 s)";
+function TrackActions({ trackId }: { trackId: string }) {
   return (
     <span className="flex items-center gap-0.5">
-      <button
-        type="button"
-        onClick={() => toggle(trackId)}
-        aria-label={label}
-        title={label}
-        className={`inline-flex size-[26px] flex-none cursor-pointer items-center justify-center rounded-full border-0 ${
-          mine?.status === "playing" ? "bg-aqua text-aqua-ink" : mine?.status === "error" ? "bg-coral/15 text-[#ff8a8a]" : "bg-tag text-soft hover:bg-[#2a303a] hover:text-ink"
-        }`}
-      >
-        {mine?.status === "loading" ? (
-          <span className="tp-pulse size-2 rounded-full bg-aqua" />
-        ) : mine?.status === "playing" ? (
-          <span className="flex h-3 items-end gap-[2px]" aria-hidden="true">
-            {[0.5, 1, 0.7].map((h, i) => (
-              <span key={i} className="tp-eq block w-[2px] rounded-sm bg-aqua-ink" style={{ height: `${h * 100}%`, animationDelay: `${-i * 0.2}s` }} />
-            ))}
-          </span>
-        ) : mine?.status === "error" ? (
-          <Icon name="x" size={11} strokeWidth={2.6} />
-        ) : (
-          <svg width="10" height="10" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M7 4.5v15l12.5-7.5z" fill="currentColor" />
-          </svg>
-        )}
-      </button>
+      <PlayButton previewKey={`log:${trackId}`} trackId={trackId} />
       <a
         href={`https://tidal.com/browse/track/${encodeURIComponent(trackId)}`}
         target="_blank"
@@ -145,7 +89,6 @@ function PlayButton({ trackId, state, toggle }: { trackId: string; state: PlaySt
 }
 
 export default function LogViewer({ logs }: { logs: LogLine[] }) {
-  const { state: playing, toggle } = usePreview();
   const [level, setLevel] = useState("all");
   const [q, setQ] = useState("");
   const rows = useMemo(() => logs.map((l) => ({ ...l, parsed: parse(l), haystack: l.message.toLowerCase() })), [logs]);
@@ -212,7 +155,7 @@ export default function LogViewer({ logs }: { logs: LogLine[] }) {
               >
                 {lv.label}
               </span>
-              <span className="flex h-[22px] items-center">{r.trackId && <PlayButton trackId={r.trackId} state={playing} toggle={toggle} />}</span>
+              <span className="flex h-[22px] items-center">{r.trackId && <TrackActions trackId={r.trackId} />}</span>
               {/* title : message brut, au survol (et repère stable pour les tests) */}
               <div className="min-w-0 text-[13.5px] leading-[22px]" title={r.message}>
                 {p.kind === "moved" && (
