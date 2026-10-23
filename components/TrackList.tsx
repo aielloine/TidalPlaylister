@@ -66,7 +66,12 @@ export default function TrackList({ tracks, compact = false, label = "Titres cla
                   </span>
                 )}
                 <GenreTags genres={t.genres} via={t.via} />
-                {!t.managed && (
+                {t.unknown && (
+                  <span className="text-[12.5px] text-faint" title="Tidal ne renvoie plus ce titre (retiré du catalogue ou indisponible dans votre pays) : genres inconnus">
+                    genres inconnus (introuvable sur Tidal)
+                  </span>
+                )}
+                {!t.managed && !t.unknown && (
                   <span className="text-[12.5px] text-faint" title="Déjà dans la playlist avant l'appli, ou retiré à la main : l'appli n'y touche plus">
                     (non géré)
                   </span>

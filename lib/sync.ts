@@ -7,6 +7,7 @@ import {
   getFavoriteTrackIds,
   getPlaylistItems,
   getPlaylistTrackIds,
+  getTrackInfo,
   removeFavorites,
   removeFromPlaylist,
   resolveTracks,
@@ -183,6 +184,16 @@ async function rebalance({
     const infos = await resolveTracks(missing.map((r) => r.trackId), ignored);
     for (const t of infos)
       await prisma.processedTrack.update({ where: { trackId: t.id }, data: { label: t.label, genres: JSON.stringify(t.genres) } });
+    // Introuvables dans le catalogue Tidal (retirés, ou indisponibles dans le pays) : genres impossibles à connaître.
+    // On garde le titre là où il est (byApp false : plus jamais ré-analysé ni déplacé) et on récupère au moins son nom.
+    const found = new Set(infos.map((t) => t.id));
+    const lost = missing.filter((r) => !found.has(r.trackId));
+    for (const r of lost) {
+      const t = await getTrackInfo(r.trackId).catch(() => null);
+      const label = t?.title ? `${t.artist || "?"} — ${t.title}` : null;
+      await prisma.processedTrack.update({ where: { trackId: r.trackId }, data: { byApp: false, ...(label && { label }) } });
+      await log("info", `${label ?? r.trackId} — introuvable sur Tidal : genres inconnus, laissé dans « ${names.get(r.playlistId) ?? r.playlistId} »`, r.trackId);
+    }
     const left = await prisma.processedTrack.count({ where: { ...managed, genres: null } });
     await log("info", `${infos.length} titre(s) déjà classé(s) ré-analysé(s) pour vérifier leur playlist${left ? ` (${left} au prochain passage)` : ""}`);
   }

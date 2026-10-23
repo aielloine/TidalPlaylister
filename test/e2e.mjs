@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -107,7 +108,7 @@ const fake = createServer(async (req, res) => {
   if (p === "/v2/tracks") {
     assert.deepEqual(url.searchParams.getAll("include").sort(), ["albums", "artists", "genres"]);
     return json({
-      data: ids.map((id) => ({
+      data: ids.filter((id) => tracks[id]).map((id) => ({
         id,
         type: "tracks",
         attributes: { title: tracks[id].title, isrc: tracks[id].isrc ?? `ISRC-${id}` },
@@ -121,6 +122,7 @@ const fake = createServer(async (req, res) => {
     });
   }
   const one = p.match(/^\/v2\/tracks\/(\w+)$/);
+  if (one && !tracks[one[1]]) return res.writeHead(404).end(JSON.stringify({ errors: [{ code: "NOT_FOUND" }] }));
   if (one)
     return json({
       data: { id: one[1], type: "tracks", attributes: { title: tracks[one[1]].title, isrc: tracks[one[1]].isrc ?? `ISRC-${one[1]}` } },
@@ -324,6 +326,11 @@ try {
   assert.match(classified, /Song Eight<[\s\S]*?>Indie \/ folk calme</);
   assert.match(dash, /Titres triés<[\s\S]*?>5</);
 
+  // Titre classé autrefois (sans genres mémorisés), retiré depuis du catalogue Tidal : la ré-analyse ne le trouve pas.
+  const sql = new DatabaseSync(db);
+  sql.prepare(`INSERT INTO "ProcessedTrack" ("trackId", "playlistId", "createdAt", "byApp") SELECT 't404', 'p1', "createdAt", 1 FROM "ProcessedTrack" LIMIT 1`).run();
+  sql.close();
+
   // Mode « conserver les favoris » + tous les favoris analysés
   await submit("/", "Enregistrer", { cronExpression: "0 * * * *", scanLimit: "0", pruneMismatched: "on" });
   assert.match(await page("/"), /Favoris conservés/);
@@ -335,6 +342,11 @@ try {
   assert.match(dash, /analysé\(s\) \(tous\)/);
   assert.match(dash, /1 titre\(s\) déjà classé\(s\) : non ré-ajouté\(s\)</);
   assert.match(dash, /Song Nine → « Rock » via rock \(artist tag\) \(reste en favori\)/);
+  // Introuvable : laissé dans sa playlist, plus géré, sans fausse annonce de déplacement
+  assert.match(dash, /t404 — introuvable sur Tidal : genres inconnus, laissé dans « Rock »/);
+  const lost = dash.slice(dash.indexOf("Titre #t404"));
+  assert.match(lost.slice(0, 600), /genres inconnus \(introuvable sur Tidal\)/);
+  assert.doesNotMatch(lost.slice(0, 600), /prochaine synchro/);
   assert.deepEqual(state.added.p1, ["t9"]); // t1 ne revient pas
   assert.deepEqual(state.favorites, ["t9", "t1", "t3", "t4", "t5", "t9"]); // rien n'est retiré des favoris
   assert.doesNotMatch(dash, /Échec/);
