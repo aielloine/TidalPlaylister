@@ -11,6 +11,8 @@ import {
   ignoreGenre,
   unmapGenre,
   mergePlaylists,
+  renameIdea,
+  renamePlaylist,
   saveIgnoredGenres,
   setMappingPriority,
 } from "@/app/actions";
@@ -19,6 +21,7 @@ import { Examples } from "@/components/Preview";
 import GenrePicker from "@/components/GenrePicker";
 import IgnoredGenres from "@/components/IgnoredGenres";
 import MappingChip from "@/components/MappingChip";
+import RenameForm from "@/components/RenameForm";
 import { GenreProvider, GenreTag } from "@/components/Genres";
 import TrackList from "@/components/TrackList";
 import { Cover, coverSrc, Icon, Mono, PlainCover, SectionTitle } from "@/components/ui";
@@ -28,13 +31,14 @@ import { parseList } from "@/lib/genres";
 import { coverSub } from "@/lib/coverImage";
 import { lastfmEnabled } from "@/lib/lastfm";
 import { MOODS, moodTags } from "@/lib/moods";
-import { moodCounts, suggestPlaylists, type Suggestion } from "@/lib/suggestions";
+import { moodCounts, nameKey, suggestPlaylists, type Suggestion } from "@/lib/suggestions";
 import { getPlaylists, getTidalGenres, type Playlist } from "@/lib/tidal";
 import { classifiedTracks } from "@/lib/tracks";
 
 export const dynamic = "force-dynamic";
 
 const TOP_SUGGESTIONS = 6;
+const IDEA_HINT = "la playlist sera créée sous ce nom ; vide = nom proposé";
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n > 1 ? many : one}`;
 
 function Header({ children }: { children?: React.ReactNode }) {
@@ -103,12 +107,16 @@ export default async function Playlists({ searchParams }: { searchParams: Promis
   for (const p of playlists)
     await prisma.mapping.updateMany({ where: { playlistId: p.id, NOT: { playlistName: p.name } }, data: { playlistName: p.name } });
 
-  const [mappings, genres, settings, unsortedRows] = await Promise.all([
+  const [mappings, genres, settings, unsortedRows, ideaNames] = await Promise.all([
     prisma.mapping.findMany({ orderBy: [{ priority: "desc" }, { genre: "asc" }] }),
     prisma.genre.findMany({ orderBy: { name: "asc" } }),
     getSettings(),
     prisma.unsortedTrack.findMany(),
+    prisma.ideaName.findMany(),
   ]);
+  // Noms choisis pour les idées proposées (sinon, nom du catalogue ou du genre).
+  const names = new Map(ideaNames.map((r) => [r.key, r.name]));
+  const moodName = (i: number) => names.get(nameKey(`mood:${i}`)) ?? MOODS[i].name;
   const ignoredList = parseList(settings.ignoredGenres);
   const ignored = new Set(ignoredList);
   const mapped = new Set(mappings.map((m) => m.genre));
@@ -118,10 +126,10 @@ export default async function Playlists({ searchParams }: { searchParams: Promis
   const targets = playlists.map((p) => ({ id: p.id, name: p.name })); // « Ajouter à… »
   // Sous-titre de pochette d'une ambiance : ses tags libres ou déjà mappés vers elle (même ordre qu'à la création).
   const mappedTo = new Map(mappings.map((m) => [m.genre, m.playlistName.toLowerCase()]));
-  const moodSub = (m: (typeof MOODS)[number]) =>
+  const moodSub = (m: (typeof MOODS)[number], name: string) =>
     moodTags(m)
       .map(([t]) => t)
-      .filter((t) => (mappedTo.get(t) ?? m.name.toLowerCase()) === m.name.toLowerCase())
+      .filter((t) => (mappedTo.get(t) ?? name.toLowerCase()) === name.toLowerCase())
       .slice(0, 3)
       .join(" · ");
 
@@ -133,7 +141,7 @@ export default async function Playlists({ searchParams }: { searchParams: Promis
     .filter((g) => !mapped.has(g.name) && !ignored.has(g.name))
     .map((g) => ({ name: g.name, count: hits.get(g.name) ?? 0 }))
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-  const suggestions = suggestPlaylists(unsorted, mapped, ignored, playlistNames);
+  const suggestions = suggestPlaylists(unsorted, mapped, ignored, playlistNames, names);
   const top = suggestions.slice(0, TOP_SUGGESTIONS);
   const perMood = moodCounts(suggestions);
   // Titres classés par l'appli, regroupés par playlist (liste sous chaque carte).
@@ -233,14 +241,15 @@ export default async function Playlists({ searchParams }: { searchParams: Promis
             </div>
             <ul className="tp-scroll m-0 flex max-h-[560px] list-none flex-col gap-1 overflow-auto p-0">
               {catalog.map(({ m, i, count }) => {
-                const exists = playlistNames.has(m.name.toLowerCase());
+                const name = moodName(i);
+                const exists = playlistNames.has(name.toLowerCase());
                 return (
                   <li key={m.name}>
                     <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 rounded-[14px] bg-raised p-2.5">
-                      <Cover name={m.name} sub={moodSub(m)} size={52} />
+                      <Cover name={name} sub={moodSub(m, name)} size={52} />
                       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-[15px] font-semibold">{m.name}</span>
+                          <RenameForm name={name} action={renameIdea.bind(null, `mood:${i}`)} label={`Renommer l'idée ${name}`} hint={IDEA_HINT} className="text-[15px] font-semibold" />
                           <span className="inline-flex h-5 items-center rounded-md border border-line bg-hollow px-1.5 font-mono text-[11px] text-dim">prio {m.priority}</span>
                           {exists && <span className="text-xs text-[#6ee7a0]">· existe déjà</span>}
                           {count > 0 && <span className="text-xs font-semibold text-amber">· {plural(count, "favori")} à ranger</span>}
@@ -249,12 +258,12 @@ export default async function Playlists({ searchParams }: { searchParams: Promis
                         <Examples tags={moodTags(m).map(([t]) => t)} className="mt-1" />
                       </div>
                       <div className="ml-auto flex items-center gap-2">
-                        <form action={applyMood.bind(null, i)} aria-label={`${exists ? "Compléter" : "Créer"} ${m.name}`}>
+                        <form action={applyMood.bind(null, i)} aria-label={`${exists ? "Compléter" : "Créer"} ${name}`}>
                           <Button type="submit" size="small" variant={exists ? "outlined" : "contained"} color={exists ? "inherit" : "primary"} sx={{ boxShadow: "none" }}>
                             {exists ? "Compléter" : "Créer"}
                           </Button>
                         </form>
-                        <AddToPlaylist action={applyIdeaTo.bind(null, `mood:${i}`)} playlists={targets} label={`Ajouter « ${m.name} » à une playlist existante`} />
+                        <AddToPlaylist action={applyIdeaTo.bind(null, `mood:${i}`)} playlists={targets} label={`Ajouter « ${name} » à une playlist existante`} />
                       </div>
                     </div>
                   </li>
@@ -293,7 +302,14 @@ export default async function Playlists({ searchParams }: { searchParams: Promis
                 <div className="flex items-center gap-3.5">
                   {own.length ? <Cover name={p.name} sub={sub} size={84} /> : <PlainCover size={84} />}
                   <div className="flex min-w-0 flex-col gap-1">
-                    <h3 className="m-0 font-display text-xl font-semibold leading-[1.15] tracking-tight">{p.name}</h3>
+                    <RenameForm
+                      as="h3"
+                      name={p.name}
+                      action={renamePlaylist.bind(null, p.id)}
+                      label={`Renommer ${p.name}`}
+                      hint="renommée aussi sur Tidal ; genres mappés et titres classés restent attachés"
+                      className="break-words font-display text-xl font-semibold leading-[1.15] tracking-tight"
+                    />
                     <span className="text-[13px] text-muted">
                       {plural(p.tracks, "titre")} · {own.length ? plural(own.length, "genre") : "aucun genre"}
                     </span>
@@ -413,7 +429,13 @@ function Suggestions({ top, rest, unsortedCount, targets }: { top: Suggestion[];
               <div className="flex items-center gap-3">
                 <Cover name={s.name} sub={s.coverSub} size={56} />
                 <div className="flex min-w-0 flex-col gap-0.5">
-                  <span className="truncate font-display text-[17px] font-semibold tracking-tight">{s.name}</span>
+                  <RenameForm
+                    name={s.name}
+                    action={renameIdea.bind(null, s.key)}
+                    label={`Renommer l'idée ${s.name}`}
+                    hint={IDEA_HINT}
+                    className="truncate font-display text-[17px] font-semibold tracking-tight"
+                  />
                   <span className="text-[13px]">
                     <strong className="font-semibold text-amber">{plural(s.count, "favori")}</strong>
                     <span className="text-muted"> à ranger{s.exists && " · existe déjà"}</span>
@@ -463,8 +485,9 @@ function Suggestions({ top, rest, unsortedCount, targets }: { top: Suggestion[];
               <li key={s.key}>
                 <div className="flex items-center gap-3 rounded-xl p-1.5 hover:bg-raised">
                   <Cover name={s.name} sub={s.coverSub} size={36} />
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                    {s.name} <Mono className="text-xs text-faint">· {s.count}</Mono>
+                  <span className="flex min-w-0 flex-1 items-center gap-1 text-sm font-medium">
+                    <RenameForm name={s.name} action={renameIdea.bind(null, s.key)} label={`Renommer l'idée ${s.name}`} hint={IDEA_HINT} className="truncate" />
+                    <Mono className="flex-none text-xs text-faint">· {s.count}</Mono>
                   </span>
                   <span className="hidden min-w-0 flex-1 truncate text-xs text-muted sm:block">{s.tags.slice(0, 4).join(", ")}</span>
                   <form action={applySuggestion.bind(null, s.key)} aria-label={`${s.exists ? "Compléter" : "Créer"} ${s.name}`}>
