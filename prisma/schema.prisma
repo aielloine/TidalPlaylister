@@ -99,6 +99,7 @@ model LogEntry {
   level     String // "info" | "moved" | "skipped" | "error"
   message   String
   trackId   String?
+  genres    String? // tableau JSON de tous les genres du titre (affichés et cliquables dans les logs)
   createdAt DateTime @default(now())
 
   @@index([runId])
