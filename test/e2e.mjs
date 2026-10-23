@@ -318,6 +318,10 @@ try {
   dash = await page("/");
   assert.match(dash, /Song Six — déjà dans « Jazz » : non ré-ajouté, retiré des favoris/);
   assert.match(dash, /title="rap français → « Jazz » · cliquer pour changer"/); // genres aussi sur les lignes INFO d'un titre
+  // Titres déjà classés : onglet des logs, avec leur playlist et leurs tags cliquables
+  const classified = dash.slice(dash.indexOf('aria-label="Titres classés"'));
+  assert.match(classified, /Song One<[\s\S]*?>Rock<[\s\S]*?title="rock → « Rock » · cliquer pour changer"/);
+  assert.match(classified, /Song Eight<[\s\S]*?>Indie \/ folk calme</);
   assert.match(dash, /Titres triés<[\s\S]*?>5</);
 
   // Mode « conserver les favoris » + tous les favoris analysés
@@ -355,6 +359,10 @@ try {
   const pl4 = await page("/playlists");
   assert.doesNotMatch(pl4, /Idées de playlists/); // tous leurs tags sont maintenant mappés
   assert.doesNotMatch(pl4.slice(pl4.indexOf("Genres détectés non mappés"), pl4.indexOf("Playlists d")), /artist tag/);
+  // Sous chaque playlist : ses titres classés, tags cliquables ; « artist tag » les enverra ailleurs au prochain passage
+  const rockTracks = pl4.slice(pl4.indexOf('aria-label="Titres classés dans Rock"'));
+  assert.match(rockTracks, /Song Nine<[\s\S]*?title="artist tag → « Artist Tag » · cliquer pour changer"[\s\S]*?→ Artist Tag à la prochaine synchro/);
+  assert.match(pl4, /aria-haspopup="dialog"[^>]*title="Exemples, changer de playlist…"[^>]*>rock</); // nom d'un genre mappé
 
   // Rangement : « artist tag » (prio 10) bat désormais « rock » et « jazz » (génériques, prio 0) ; t1, retiré à la
   // main de Rock, n'est pas touché. Nouveaux favoris t3/t4 → Artist Tag (p11), t5 → Reggae (p13).

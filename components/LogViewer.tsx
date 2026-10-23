@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import GenreMenu, { type GenreMapping, type MenuPlaylist } from "@/components/GenreMenu";
+import { GenreFilterChip, GenreTags, useGenres } from "@/components/Genres";
 import { PlayButton } from "@/components/Preview";
 import { Cover, Icon } from "@/components/ui";
 
@@ -69,7 +69,7 @@ const PlaylistChip = ({ name }: { name: string }) => (
   </span>
 );
 
-function TrackActions({ trackId }: { trackId: string }) {
+export function TrackActions({ trackId }: { trackId: string }) {
   return (
     <span className="flex items-center gap-0.5">
       <PlayButton previewKey={`log:${trackId}`} trackId={trackId} />
@@ -91,85 +91,11 @@ function TrackActions({ trackId }: { trackId: string }) {
   );
 }
 
-const SHOWN_TAGS = 6;
-
-// Chips des genres d'un titre, cliquables : exemples, mapping actuel, (ré)association à une playlist.
-// via : genre qui a décidé du classement (en tête, en couleur). Pointillés ambre : genre non mappé.
-function TagChips({
-  genres,
-  via,
-  mappings,
-  open,
-  onOpen,
-}: {
-  genres: string[];
-  via?: string;
-  mappings: Record<string, GenreMapping>;
-  open: string | null;
-  onOpen: (el: HTMLElement, genre: string) => void;
-}) {
-  const [all, setAll] = useState(false);
-  const list = via ? [via, ...genres.filter((g) => g !== via)] : genres;
-  const shown = all ? list : list.slice(0, SHOWN_TAGS);
-  return (
-    <>
-      {shown.map((g) => {
-        const m = mappings[g];
-        const on = open === g;
-        const tone = on
-          ? "border-aqua bg-aqua/12 text-aqua"
-          : g === via
-            ? "border-aqua/45 bg-aqua/8 text-[#7ff3e8] hover:border-aqua"
-            : m
-              ? "border-[#2a303a] text-soft hover:border-soft"
-              : "border-dashed border-amber/55 text-[#f5c46e] hover:border-amber";
-        return (
-          <button
-            key={g}
-            type="button"
-            aria-haspopup="dialog"
-            aria-expanded={on}
-            title={m ? `${g} → « ${m.playlistName} » · cliquer pour changer` : `${g} : non mappé · cliquer pour l'associer`}
-            onClick={(e) => onOpen(e.currentTarget, g)}
-            className={`inline-flex h-[22px] cursor-pointer items-center rounded-full border bg-transparent px-2 text-[12.5px] ${tone}`}
-          >
-            {g}
-          </button>
-        );
-      })}
-      {list.length > SHOWN_TAGS && (
-        <button type="button" onClick={() => setAll(!all)} className="cursor-pointer border-0 bg-transparent p-0 text-[12.5px] text-faint hover:text-ink">
-          {all ? "moins" : `+${list.length - SHOWN_TAGS}`}
-        </button>
-      )}
-    </>
-  );
-}
-
-export default function LogViewer({
-  logs,
-  mappings = {},
-  pruneMismatched = true,
-  assign,
-  ignore,
-  unmap,
-  loadPlaylists,
-}: {
-  logs: LogLine[];
-  mappings?: Record<string, GenreMapping>;
-  pruneMismatched?: boolean;
-  assign?: (f: FormData) => Promise<void>;
-  ignore?: (genre: string) => Promise<void>;
-  unmap?: (genre: string) => Promise<void>;
-  loadPlaylists?: () => Promise<MenuPlaylist[]>;
-}) {
+// Tags de genre cliquables via GenreProvider (components/Genres.tsx), qui porte aussi le filtre « genre ».
+export default function LogViewer({ logs }: { logs: LogLine[] }) {
   const [level, setLevel] = useState("all");
   const [q, setQ] = useState("");
-  const [tag, setTag] = useState<string | null>(null);
-  const [menu, setMenu] = useState<{ el: HTMLElement; genre: string } | null>(null);
-  // Playlists du menu : chargées à la 1re ouverture, rechargées si les mappings ont changé depuis (pochettes).
-  const mapKey = useMemo(() => JSON.stringify(mappings), [mappings]);
-  const [pl, setPl] = useState<{ key: string; list?: MenuPlaylist[]; error?: string } | null>(null);
+  const tag = useGenres()?.filter;
   const rows = useMemo(
     () =>
       logs.map((l) => {
@@ -186,27 +112,7 @@ export default function LogViewer({
   }, [logs]);
   const needle = q.trim().toLowerCase();
   const shown = rows.filter((r) => (level === "all" || r.level === level) && (!needle || r.haystack.includes(needle)) && (!tag || r.genres.includes(tag)));
-
-  const interactive = !!(assign && ignore && loadPlaylists);
-  const openMenu = (el: HTMLElement, genre: string) => {
-    setMenu({ el, genre });
-    if (loadPlaylists && (pl?.key !== mapKey || pl.error)) {
-      setPl({ key: mapKey });
-      loadPlaylists()
-        .then((list) => setPl({ key: mapKey, list }))
-        .catch((e) => setPl({ key: mapKey, error: (e as Error).message }));
-    }
-  };
-  const chips = (genres: string[], via?: string) =>
-    interactive ? (
-      <TagChips genres={genres} via={via} mappings={mappings} open={menu?.genre ?? null} onOpen={openMenu} />
-    ) : (
-      [via, ...genres.filter((g) => g !== via)].filter(Boolean).map((g) => (
-        <span key={g} className="inline-flex h-[22px] items-center rounded-full border border-[#2a303a] px-2 text-[12.5px] text-soft">
-          {g}
-        </span>
-      ))
-    );
+  const chips = (genres: string[], via?: string) => <GenreTags genres={genres} via={via} />;
 
   return (
     <div className="flex flex-col gap-4">
@@ -242,17 +148,7 @@ export default function LogViewer({
             className="h-full min-w-0 flex-1 border-0 bg-transparent text-sm text-ink outline-none placeholder:text-faint"
           />
         </label>
-        {tag && (
-          <button
-            type="button"
-            onClick={() => setTag(null)}
-            aria-label={`Retirer le filtre genre ${tag}`}
-            className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-full border border-aqua bg-aqua/12 px-3.5 text-[13px] font-semibold text-aqua"
-          >
-            Genre : {tag}
-            <Icon name="x" size={13} strokeWidth={2.4} />
-          </button>
-        )}
+        <GenreFilterChip />
       </div>
 
       <ol aria-label="Lignes de log" className="tp-scroll m-0 flex max-h-[560px] list-none flex-col gap-0.5 overflow-auto rounded-[14px] border border-[#1d2128] bg-well p-1.5">
@@ -320,43 +216,6 @@ export default function LogViewer({
           );
         })}
       </ol>
-
-      {interactive && (
-        <GenreMenu
-          key={menu ? `${menu.genre}|${mappings[menu.genre]?.playlistId ?? ""}` : ""}
-          anchor={menu?.el ?? null}
-          genre={menu?.genre ?? null}
-          mapping={menu ? mappings[menu.genre] : undefined}
-          playlists={pl?.list ?? null}
-          playlistsError={pl?.error}
-          assign={assign!}
-          ignore={ignore!}
-          unmap={unmap}
-          onClose={() => setMenu(null)}
-          footer={
-            menu && (
-              <div className="flex flex-col gap-1.5 border-t border-[#2a303a] pt-2.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTag(menu.genre);
-                    setMenu(null);
-                  }}
-                  className="inline-flex cursor-pointer items-center gap-1.5 self-start border-0 bg-transparent p-0 text-xs font-semibold text-lilac-soft hover:text-ink"
-                >
-                  <Icon name="search" size={13} strokeWidth={2.2} />
-                  Voir les titres de ce genre dans les logs
-                </button>
-                <span className="text-[12px] leading-[1.45] text-muted">
-                  {pruneMismatched
-                    ? "Les titres déjà classés via ce genre changent de playlist à la prochaine synchro (« Ranger à nouveau »)."
-                    : "« Ranger à nouveau » est désactivé : les titres déjà classés restent dans leur playlist actuelle."}
-                </span>
-              </div>
-            )
-          }
-        />
-      )}
     </div>
   );
 }

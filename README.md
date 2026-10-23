@@ -55,11 +55,15 @@ Sur `/playlists` :
   l'appli Tidal. Polices (Bricolage Grotesque, Geist Mono — OFL) téléchargées une fois depuis jsdelivr dans
   `data/fonts` ; à défaut, police par défaut.
 
-Dans les logs, ▶ joue un **extrait de 30 s** (Deezer, retrouvé par ISRC) et ↗ ouvre le titre dans Tidal.
-Chaque ligne d'un titre affiche **tous ses genres** en chips, même s'il a été classé (celui qui a décidé du
-classement en tête, en couleur ; les non mappés en pointillés). Un clic sur un genre : exemples à écouter, playlist
-actuelle, **changer de playlist** (ou démapper, ignorer), et « Voir les titres de ce genre dans les logs ». Avec
-« Ranger à nouveau », les titres déjà classés suivent le nouveau mapping à la synchro suivante.
+Dans les logs, ▶ joue un **extrait de 30 s** (Deezer, retrouvé par ISRC) et ↗ ouvre le titre dans Tidal. Deux
+onglets : **Dernière synchro** et **Titres classés** (tous les titres rangés par l'appli, avec leur playlist,
+recherchables). Les titres classés d'une playlist sont aussi listés sous sa carte, sur `/playlists`.
+
+**Tags de genre** : même composant partout (logs, titres classés, genres mappés et non mappés, idées de playlists),
+`components/Genres.tsx`. Sur un titre, tous ses genres sont affichés (celui qui décide de sa playlist en tête, en
+couleur ; les non mappés en pointillés). Un clic : exemples à écouter, playlist actuelle, **changer de playlist**
+(ou démapper, ignorer) et « Filtrer les titres sur ce genre ». Avec « Ranger à nouveau », les titres déjà classés
+suivent le nouveau mapping à la synchro suivante (indiqué « → playlist à la prochaine synchro »).
 
 ## Prérequis Tidal
 1. Créer une app sur https://developer.tidal.com/dashboard
