@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { hashPassword, requireUser } from "@/lib/auth";
 import { getSettings, prisma } from "@/lib/db";
 import { defaultPriority, normGenre, parseList } from "@/lib/genres";
+import { coverSub } from "@/lib/coverImage";
 import { MOODS, moodTags } from "@/lib/moods";
 import { titleCase } from "@/lib/suggestions";
 import { startScheduler } from "@/lib/scheduler";
@@ -182,6 +183,7 @@ export async function assignGenre(f: FormData) {
     create: { genre, playlistId, playlistName, priority: p },
   });
   revalidatePath("/playlists");
+  revalidatePath("/"); // chips de genres des logs
 }
 
 export async function ignoreGenre(genre: string) {
@@ -189,6 +191,26 @@ export async function ignoreGenre(genre: string) {
   const { ignoredGenres } = await getSettings();
   await prisma.settings.update({ where: { id: 1 }, data: { ignoredGenres: parseList(`${ignoredGenres},${genre}`).join(",") } });
   revalidatePath("/playlists");
+  revalidatePath("/");
+}
+
+// Depuis un chip de genre des logs : retire son mapping (le genre redevient « non mappé »).
+export async function unmapGenre(genre: string) {
+  await requireUser();
+  await prisma.mapping.deleteMany({ where: { genre: normGenre(genre) } });
+  revalidatePath("/playlists");
+  revalidatePath("/");
+}
+
+// Playlists Tidal pour le menu d'un genre des logs, chargées à la première ouverture (pas d'appel Tidal à chaque
+// rendu du dashboard). sub : sous-titre de pochette si la playlist est gérée, null sinon.
+export async function listPlaylists() {
+  await requireUser();
+  const [playlists, mappings] = await Promise.all([tidal.getPlaylists(), prisma.mapping.findMany()]);
+  return playlists.map((p) => {
+    const own = mappings.filter((m) => m.playlistId === p.id);
+    return { ...p, sub: own.length ? coverSub(own) : null };
+  });
 }
 
 // Fusion : copie les titres des sources dans la cible (sans doublon, dans l'ordre), y transfère leurs genres et le
