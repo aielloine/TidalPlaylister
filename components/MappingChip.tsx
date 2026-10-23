@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { useGenres } from "@/components/Genres";
 import { Icon } from "@/components/ui";
 
-// Genre mappé : pastille de priorité cliquable (Entrée pour enregistrer, Échap pour annuler) + suppression.
+// Genre mappé : pastille de priorité cliquable (Entrée pour enregistrer, Échap pour annuler), nom cliquable (menu
+// commun des genres : exemples, changer de playlist…) + suppression.
 export default function MappingChip({
   genre,
   priority,
@@ -16,6 +18,7 @@ export default function MappingChip({
   remove: () => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
+  const g = useGenres();
   const strong = priority >= 10;
   return (
     <li
@@ -50,7 +53,20 @@ export default function MappingChip({
           {priority}
         </button>
       )}
-      {genre}
+      {g ? (
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          aria-expanded={g.current === genre}
+          title="Exemples, changer de playlist…"
+          onClick={(e) => g.open(e.currentTarget, genre)}
+          className="cursor-pointer border-0 bg-transparent p-0 text-inherit hover:underline hover:underline-offset-4"
+        >
+          {genre}
+        </button>
+      ) : (
+        genre
+      )}
       <form action={remove}>
         <button
           type="submit"
