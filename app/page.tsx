@@ -1,14 +1,18 @@
 import { Alert, Card } from "@mui/material";
 import { assignGenre, disconnectTidal, ignoreGenre, listPlaylists, saveSettings, syncNow, unmapGenre } from "@/app/actions";
 import AutoRefresh from "@/components/AutoRefresh";
+import { GenreProvider } from "@/components/Genres";
 import LogViewer from "@/components/LogViewer";
 import SettingsForm from "@/components/SettingsForm";
 import SyncButton from "@/components/SyncButton";
+import Tabs from "@/components/Tabs";
+import TrackList from "@/components/TrackList";
 import { CronChip, Icon, Logo, Mono, Overline, Pill, SectionTitle } from "@/components/ui";
 import { getSettings, prisma } from "@/lib/db";
 import { ago, dayTime, duration, hm, hms, int, until } from "@/lib/format";
 import { nextRun } from "@/lib/scheduler";
 import { isSyncRunning } from "@/lib/sync";
+import { classifiedTracks } from "@/lib/tracks";
 
 export const dynamic = "force-dynamic";
 
@@ -58,7 +62,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const mappings = Object.fromEntries(mappingRows.map((m) => [m.genre, { playlistId: m.playlistId, playlistName: m.playlistName, priority: m.priority }]));
   const running = isSyncRunning();
   const next = settings.cronEnabled ? nextRun() : null;
-  const logs = await withGenres(lastRun?.logs ?? []);
+  const [logs, tracks] = await Promise.all([withGenres(lastRun?.logs ?? []), classifiedTracks(settings.ignoredGenres)]);
   const wave = waveColors(running, lastRun?.moved ?? 0, lastRun?.skipped ?? 0, lastRun?.failed ?? 0);
 
   return (
@@ -232,31 +236,51 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       <div className="flex flex-wrap items-start gap-4">
         <Card component="section" aria-labelledby="logs-title" className="flex min-w-0 flex-[999_1_620px] flex-col gap-4 p-[22px]">
           <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1.5">
-            <SectionTitle id="logs-title">Logs de la dernière synchro</SectionTitle>
+            <SectionTitle id="logs-title">Logs</SectionTitle>
             {lastRun && (
               <span className="text-[13px] text-muted">
-                Synchro <Mono className="text-soft">#{lastRun.id}</Mono> · {lastRun.dryRun ? "dry run" : "réelle"} · {lastRun.trigger === "cron" ? "cron" : "manuelle"}
+                Dernière synchro <Mono className="text-soft">#{lastRun.id}</Mono> · {lastRun.dryRun ? "dry run" : "réelle"} ·{" "}
+                {lastRun.trigger === "cron" ? "cron" : "manuelle"}
               </span>
             )}
           </div>
-          {logs.length ? (
-            <LogViewer
-              logs={logs}
-              mappings={mappings}
-              pruneMismatched={settings.pruneMismatched}
-              assign={assignGenre}
-              ignore={ignoreGenre}
-              unmap={unmapGenre}
-              loadPlaylists={listPlaylists}
+          <GenreProvider
+            mappings={mappings}
+            pruneMismatched={settings.pruneMismatched}
+            loadPlaylists={listPlaylists}
+            assign={assignGenre}
+            ignore={ignoreGenre}
+            unmap={unmapGenre}
+          >
+            <Tabs
+              label="Logs"
+              tabs={[
+                {
+                  key: "run",
+                  title: "Dernière synchro",
+                  content: logs.length ? (
+                    <LogViewer logs={logs} />
+                  ) : (
+                    <div className="flex flex-col items-center gap-3 rounded-[14px] border border-dashed border-[#2f3540] px-4 py-12 text-center">
+                      <span className="text-[15px] font-semibold">Aucune synchronisation pour l&apos;instant.</span>
+                      <span className="max-w-md text-[13.5px] text-muted">
+                        Après un dry run, chaque titre apparaît ici avec son genre et la playlist choisie.
+                      </span>
+                    </div>
+                  ),
+                },
+                {
+                  key: "classified",
+                  title: (
+                    <>
+                      Titres classés <span className="font-mono text-[12px] opacity-70">{int(tracks.length)}</span>
+                    </>
+                  ),
+                  content: <TrackList tracks={tracks} />,
+                },
+              ]}
             />
-          ) : (
-            <div className="flex flex-col items-center gap-3 rounded-[14px] border border-dashed border-[#2f3540] px-4 py-12 text-center">
-              <span className="text-[15px] font-semibold">Aucune synchronisation pour l&apos;instant.</span>
-              <span className="max-w-md text-[13.5px] text-muted">
-                Après un dry run, chaque titre apparaît ici avec son genre et la playlist choisie.
-              </span>
-            </div>
-          )}
+          </GenreProvider>
         </Card>
 
         <Card component="section" aria-labelledby="plan-title" className="flex min-w-0 flex-[1_1_360px] flex-col gap-[22px] p-[22px]">
