@@ -22,7 +22,9 @@ Réglage « Retirer des favoris après classement » sur le dashboard :
 Dans les deux cas :
 - un titre (ou un de ses doublons) **déjà présent** dans la playlist n'y est pas ré-ajouté ;
 - un titre classé est mémorisé : s'il est ensuite **retiré de la playlist à la main**, il n'y revient jamais (même
-  re-liké, ou si son mapping change). En mode « retirer », un titre déjà classé encore en favori en est retiré.
+  re-liké, ou si son mapping change). En mode « retirer », un titre déjà classé encore en favori en est retiré ;
+- un titre **ajouté à la main** dans une playlist gérée (liké ou non) n'est jamais retiré : l'appli ne déplace ou
+  ne retire que les titres qu'elle a elle-même ajoutés.
 
 **Ranger à nouveau** (réglage, activé par défaut) : à chaque synchro, les titres déjà classés par l'appli sont
 ré-évalués avec leurs genres mémorisés. Si un changement de mapping (genre supprimé, réassigné, ignoré…) les mène
@@ -42,6 +44,12 @@ Sur `/playlists` :
   sur Tidal et mappe ses tags ; les titres sont rangés à la synchro suivante.
 - **Playlists d'ambiance** : le catalogue complet (22 idées, `lib/moods.ts`), chacune crée la playlist et mappe d'un
   coup les tags Last.fm correspondants.
+- **Renommer** (crayon à côté du nom) :
+  - une **playlist existante** : renommée sur Tidal ; ses genres mappés et ses titres déjà classés restent
+    attachés, et une idée qui portait son ancien nom le suit (« Compléter » retrouve la playlist au lieu d'en recréer
+    une) ;
+  - une **idée proposée** (idée de playlist ou ambiance) : la playlist sera créée sous ce nom ; nom vide = retour au
+    nom proposé.
 - **Ajouter à…** (idées et ambiances) : met leurs tags encore libres dans une playlist existante au lieu d'en créer une.
 - **Fusionner des playlists** : les titres des playlists cochées sont copiés dans la cible (sans doublon), leurs
   genres mappés et le suivi des titres déjà classés passent sur la cible ; les sources peuvent ensuite être

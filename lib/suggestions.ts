@@ -12,6 +12,9 @@ export type Suggestion = {
   coverSub: string; // sous-titre de la pochette qui sera générée (3 premiers tags mappés)
 };
 
+// Clé du nom personnalisé d'une idée (IdeaName) : l'ambiance par son nom de catalogue, pas par son index.
+export const nameKey = (key: string) => (key.startsWith("mood:") ? `mood:${MOODS[Number(key.slice(5))]?.name ?? key.slice(5)}` : key);
+
 const MIN_GENRE_HITS = 3; // en dessous, un genre seul ne justifie pas une playlist
 
 export const titleCase = (s: string) => s.replace(/(^|[\s/&-])(\p{L})/gu, (_, sep, l) => sep + l.toUpperCase());
@@ -27,14 +30,22 @@ function cover(tracks: Unsorted[], tags: Set<string>) {
   };
 }
 
-export function suggestPlaylists(tracks: Unsorted[], mapped: Set<string>, ignored: Set<string>, playlistNames: Set<string>) {
+// names : noms personnalisés des idées (clé nameKey), à la place du nom proposé.
+export function suggestPlaylists(
+  tracks: Unsorted[],
+  mapped: Set<string>,
+  ignored: Set<string>,
+  playlistNames: Set<string>,
+  names: Map<string, string> = new Map(),
+) {
   const free = (g: string) => !mapped.has(g) && !ignored.has(g);
   const out: Suggestion[] = [];
 
   MOODS.forEach((m, i) => {
     const tags = moodTags(m).map(([g]) => g).filter(free);
     const c = cover(tracks, new Set(tags));
-    if (c.count) out.push({ key: `mood:${i}`, name: m.name, exists: playlistNames.has(m.name.toLowerCase()), coverSub: tags.slice(0, 3).join(" · "), ...c });
+    const name = names.get(`mood:${m.name}`) ?? m.name;
+    if (c.count) out.push({ key: `mood:${i}`, name, exists: playlistNames.has(name.toLowerCase()), coverSub: tags.slice(0, 3).join(" · "), ...c });
   });
 
   // Genres fréquents qu'aucune idée du catalogue ne couvre : une playlist à leur nom.
@@ -43,7 +54,7 @@ export function suggestPlaylists(tracks: Unsorted[], mapped: Set<string>, ignore
   for (const t of tracks) for (const g of t.genres) if (free(g) && !catalog.has(g)) freq.set(g, (freq.get(g) ?? 0) + 1);
   for (const [g, n] of freq) {
     if (n < MIN_GENRE_HITS) continue;
-    const name = titleCase(g);
+    const name = names.get(`genre:${g}`) ?? titleCase(g);
     out.push({ key: `genre:${g}`, name, exists: playlistNames.has(name.toLowerCase()), coverSub: g, ...cover(tracks, new Set([g])) });
   }
 
