@@ -30,7 +30,7 @@ const lastfmTracks = {
 };
 const lastfmCalls = [];
 const drops = { tracks: 1, deezer: 1 }; // coupures réseau simulées (socket fermée sans réponse)
-const state = { favorites: ["t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8"], added: {}, manual: {}, created: [], deleted: [], deezerIsrcs: [], artworkCalls: 0 };
+const state = { favorites: ["t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8"], added: {}, manual: {}, created: [], deleted: [], renamed: {}, deezerIsrcs: [], artworkCalls: 0 };
 const createdId = (i) => `p${9 + i}`; // Nouvelle = p9, Indie / folk calme = p10, …
 
 const fake = createServer(async (req, res) => {
@@ -71,8 +71,9 @@ const fake = createServer(async (req, res) => {
   if (p === "/v2/users/me") return json({ data: { id: "u1", type: "users", attributes: { country: "FR" } } });
   if (p === "/v2/playlists" && req.method === "GET") {
     assert.equal(url.searchParams.get("filter[owners.id]"), "u1");
+    const named = (doc) => (doc.data.forEach((pl) => (pl.attributes.name = state.renamed[pl.id] ?? pl.attributes.name)), doc);
     return url.searchParams.get("page[cursor]")
-      ? json({
+      ? json(named({
           data: [
             { id: "p2", type: "playlists", attributes: { name: "Jazz", numberOfTrackItems: 3 } },
             ...state.created
@@ -80,11 +81,11 @@ const fake = createServer(async (req, res) => {
               .filter((pl) => !state.deleted.includes(pl.id)),
           ],
           links: {},
-        })
-      : json({
+        }))
+      : json(named({
           data: [{ id: "p1", type: "playlists", attributes: { name: "Rock", numberOfTrackItems: 5 } }],
           links: { next: "/playlists?filter[owners.id]=u1&page[cursor]=c2" },
-        });
+        }));
   }
   if (p === "/v2/playlists" && req.method === "POST") {
     state.created.push(JSON.parse(body).data.attributes.name);
@@ -134,6 +135,12 @@ const fake = createServer(async (req, res) => {
     return res.writeHead(403).end(JSON.stringify({ errors: [{ code: "UNAUTHORIZED", detail: "Access tier is insufficient" }] }));
   }
   const del = p.match(/^\/v2\/playlists\/(\w+)$/);
+  if (del && req.method === "PATCH") {
+    const { data } = JSON.parse(body);
+    assert.equal(data.id, del[1]);
+    state.renamed[del[1]] = data.attributes.name;
+    return res.writeHead(204).end();
+  }
   if (del && req.method === "DELETE") {
     state.deleted.push(del[1]);
     return res.writeHead(204).end();
@@ -153,6 +160,7 @@ const fake = createServer(async (req, res) => {
     for (const { id, meta } of JSON.parse(body).data) {
       assert.equal(meta.itemId, `${m[1]}:${id}`);
       state.added[m[1]] = (state.added[m[1]] ?? []).filter((x) => x !== id);
+      if (state.manual[m[1]]) state.manual[m[1]] = state.manual[m[1]].filter((x) => x !== id); // un retrait à tort se verrait
     }
     return res.writeHead(204).end();
   }
@@ -311,8 +319,9 @@ try {
   assert.equal(state.favorites.length, 8);
   assert.ok(drops.tracks < 0 && drops.deezer < 0, "coupures réseau simulées"); // et rattrapées : la synchro ci-dessus a abouti
 
-  // Réel (t6 a été ajouté à la main dans « Jazz » entre-temps)
+  // Réel (t6 a été ajouté à la main dans « Jazz » entre-temps ; m1, jamais liké, ajouté à la main dans « Rock »)
   state.manual.p2 = ["t6"];
+  state.manual.p1 = ["m1"];
   await submit("/", "Synchronisation réelle");
   await waitIdle();
   assert.deepEqual(state.added, { p1: ["t1"], p2: ["t2"], p10: ["t8"] }); // doublon t7 non ajouté, t6 déjà dans p2
@@ -446,6 +455,48 @@ try {
   await waitIdle();
   assert.doesNotMatch(await page("/"), /Song (Four|Five) (→|—)/);
   assert.deepEqual(state.added.p1, ["t9", "t4", "t5"]);
+
+  // Titres ajoutés à la main dans des playlists gérées (jamais likés, ou déjà présents) : jamais retirés, même
+  // après les rangements qui ont sorti de ces playlists les titres classés par l'appli.
+  assert.deepEqual(state.manual, { p1: ["m1"], p2: ["t6"] });
+  assert.doesNotMatch(await page("/"), /m1/);
+
+  // Renommer une idée proposée : la playlist est créée sous ce nom
+  await submit("/playlists", `aria-label="Renommer l&#x27;idée Metal"`, { name: "Gros son" });
+  let pl8 = await page("/playlists");
+  assert.match(pl8, /aria-label="Créer Gros son"/);
+  assert.doesNotMatch(pl8, /aria-label="Créer Metal"/);
+  await submit("/playlists", 'aria-label="Créer Gros son"');
+  assert.equal(state.created.at(-1), "Gros son");
+  const grosSon = createdId(state.created.length - 1);
+  pl8 = await page("/playlists");
+  assert.ok(pl8.includes(">Gros son</h3>") && pl8.includes('aria-label="Compléter Gros son"'));
+
+  // Renommer une playlist : sur Tidal, dans le cache des mappings, et l'idée suit (« Compléter » la retrouve)
+  await submit("/playlists", 'aria-label="Renommer Gros son"', { name: "Métal hurlant" });
+  assert.equal(state.renamed[grosSon], "Métal hurlant");
+  pl8 = await page("/playlists");
+  assert.ok(pl8.includes(">Métal hurlant</h3>") && !pl8.includes(">Gros son</h3>"));
+  assert.match(pl8, /aria-label="Compléter Métal hurlant"/);
+  const metalCard = pl8.slice(pl8.indexOf(">Métal hurlant</h3>"), pl8.indexOf("Ajouter des genres à Métal hurlant"));
+  assert.match(metalCard, /aria-label="Retirer metal"/); // genres mappés restés attachés
+  const sqlr = new DatabaseSync(db);
+  assert.equal(sqlr.prepare(`SELECT COUNT(*) AS n FROM "Mapping" WHERE "playlistId" = ? AND "playlistName" <> 'Métal hurlant'`).get(grosSon).n, 0);
+  sqlr.close();
+  const createdCount = state.created.length;
+  await submit("/playlists", 'aria-label="Compléter Métal hurlant"');
+  assert.equal(state.created.length, createdCount); // pas de nouvelle playlist
+  // Une playlist existante (Jazz) se renomme aussi ; nom vide ou identique : rien n'est envoyé à Tidal
+  await submit("/playlists", 'aria-label="Renommer Jazz"', { name: "Jazz & blues" });
+  await submit("/playlists", 'aria-label="Renommer Rock"', { name: "Rock" });
+  await submit("/playlists", 'aria-label="Renommer Rock"', { name: "  " });
+  assert.deepEqual(Object.keys(state.renamed).sort(), [grosSon, "p2"].sort());
+  assert.match(await page("/playlists"), />Jazz &amp; blues<\/h3>/);
+  // Nom vide sur une idée : retour au nom proposé
+  await submit("/playlists", `aria-label="Renommer l&#x27;idée Afro"`, { name: "Afrobeat" });
+  assert.match(await page("/playlists"), /aria-label="Créer Afrobeat"/);
+  await submit("/playlists", `aria-label="Renommer l&#x27;idée Afrobeat"`, { name: "" });
+  assert.match(await page("/playlists"), /aria-label="Créer Afro"/);
 
   // Exemples à écouter : d'abord vos titres portant le genre, puis des titres connus (Last.fm + extrait Deezer)
   const ex = (await (await http("/api/examples?tag=Reggae")).json()).examples;
