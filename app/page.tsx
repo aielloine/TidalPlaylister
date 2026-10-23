@@ -1,5 +1,5 @@
 import { Alert, Card } from "@mui/material";
-import { disconnectTidal, saveSettings, syncNow } from "@/app/actions";
+import { assignGenre, disconnectTidal, ignoreGenre, listPlaylists, saveSettings, syncNow, unmapGenre } from "@/app/actions";
 import AutoRefresh from "@/components/AutoRefresh";
 import LogViewer from "@/components/LogViewer";
 import SettingsForm from "@/components/SettingsForm";
@@ -47,16 +47,18 @@ function CoverTile({ running }: { running: boolean }) {
 
 export default async function Dashboard({ searchParams }: { searchParams: Promise<{ tidal?: string; error?: string }> }) {
   const { tidal, error } = await searchParams;
-  const [token, settings, lastRun, totals, mappingCount] = await Promise.all([
+  const [token, settings, lastRun, totals, mappingRows] = await Promise.all([
     prisma.tidalToken.findUnique({ where: { id: 1 } }),
     getSettings(),
     prisma.syncRun.findFirst({ orderBy: { id: "desc" }, include: { logs: { orderBy: { id: "asc" } } } }),
     prisma.syncRun.aggregate({ where: { dryRun: false }, _sum: { moved: true }, _count: true }),
-    prisma.mapping.count(),
+    prisma.mapping.findMany(),
   ]);
+  const mappingCount = mappingRows.length;
+  const mappings = Object.fromEntries(mappingRows.map((m) => [m.genre, { playlistId: m.playlistId, playlistName: m.playlistName, priority: m.priority }]));
   const running = isSyncRunning();
   const next = settings.cronEnabled ? nextRun() : null;
-  const logs = (lastRun?.logs ?? []).map((l) => ({ id: l.id, time: hms(l.createdAt), level: l.level, message: l.message, trackId: l.trackId }));
+  const logs = await withGenres(lastRun?.logs ?? []);
   const wave = waveColors(running, lastRun?.moved ?? 0, lastRun?.skipped ?? 0, lastRun?.failed ?? 0);
 
   return (
@@ -238,7 +240,15 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             )}
           </div>
           {logs.length ? (
-            <LogViewer logs={logs} />
+            <LogViewer
+              logs={logs}
+              mappings={mappings}
+              pruneMismatched={settings.pruneMismatched}
+              assign={assignGenre}
+              ignore={ignoreGenre}
+              unmap={unmapGenre}
+              loadPlaylists={listPlaylists}
+            />
           ) : (
             <div className="flex flex-col items-center gap-3 rounded-[14px] border border-dashed border-[#2f3540] px-4 py-12 text-center">
               <span className="text-[15px] font-semibold">Aucune synchronisation pour l&apos;instant.</span>
@@ -256,6 +266,22 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       </div>
     </main>
   );
+}
+
+// Genres de chaque ligne : mémorisés dans le log, sinon (logs plus anciens) ceux du titre classé ou non classé.
+async function withGenres(rows: { id: number; createdAt: Date; level: string; message: string; trackId: string | null; genres: string | null }[]) {
+  const missing = [...new Set(rows.filter((l) => !l.genres && l.trackId).map((l) => l.trackId!))];
+  const [processed, unsorted] = missing.length
+    ? await Promise.all([
+        prisma.processedTrack.findMany({ where: { trackId: { in: missing }, genres: { not: null } }, select: { trackId: true, genres: true } }),
+        prisma.unsortedTrack.findMany({ where: { trackId: { in: missing } }, select: { trackId: true, genres: true } }),
+      ])
+    : [[], []];
+  const known = new Map([...unsorted, ...processed].map((t) => [t.trackId, t.genres!]));
+  return rows.map((l) => {
+    const json = l.genres ?? (l.trackId ? known.get(l.trackId) : undefined);
+    return { id: l.id, time: hms(l.createdAt), level: l.level, message: l.message, trackId: l.trackId, genres: json ? (JSON.parse(json) as string[]) : null };
+  });
 }
 
 function RunPills({ dryRun, trigger }: { dryRun: boolean; trigger: string }) {
