@@ -1,7 +1,7 @@
 // Test de bout en bout contre un faux serveur Tidal. Prérequis : `pnpm build`. Lancement : `node test/e2e.mjs`
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -299,6 +299,9 @@ try {
   assert.match(dash, /Song Six → « Jazz » via rap français \(artist tag, rap\/hip hop\)/);
   // « musiques de films » et « seen live » ignorés, « mellow » sous le seuil -> indie folk (mappé par l'ambiance)
   assert.match(dash, /Song Eight → « Indie \/ folk calme » via indie folk \(artist tag\)/);
+  // Logs : tous les genres du titre en chips cliquables, même classé (mappé → sa playlist, non mappé en pointillés)
+  assert.match(dash, /title="indie folk → « Indie \/ folk calme » · cliquer pour changer"[^>]*>indie folk</);
+  assert.match(dash, /title="artist tag : non mappé · cliquer pour l&#x27;associer"/);
   assert.deepEqual(state.deezerIsrcs.sort(), ["ISRC-t3", "ISRC-t8", "ISRC5", "ISRC6"]); // Deezer seulement sans genre Tidal exploitable
   assert.ok(lastfmCalls.includes("track.gettoptags:Song Eight") && lastfmCalls.includes("artist.gettoptags:Artist"));
   assert.equal(lastfmCalls.filter((c) => c === "artist.gettoptags:Artist").length, 1); // cache artiste
@@ -314,6 +317,7 @@ try {
   assert.deepEqual(state.favorites, ["t3", "t4", "t5"]); // mais retirés des favoris
   dash = await page("/");
   assert.match(dash, /Song Six — déjà dans « Jazz » : non ré-ajouté, retiré des favoris/);
+  assert.match(dash, /title="rap français → « Jazz » · cliquer pour changer"/); // genres aussi sur les lignes INFO d'un titre
   assert.match(dash, /Titres triés<[\s\S]*?>5</);
 
   // Mode « conserver les favoris » + tous les favoris analysés
@@ -433,6 +437,11 @@ try {
   assert.match(dash, /aria-label="Écouter un extrait \(30 s\)"/);
   assert.deepEqual(await (await http("/api/preview/t5")).json(), { url: "https://cdn.test/p5.mp3", link: "https://deezer.test/5" });
   assert.equal((await http("/api/preview/t3")).status, 404); // ni ISRC ni recherche Deezer
+
+  // Version discrète en bas à droite, celle de package.json
+  const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  assert.match(version, /^\d{4}\.\d{1,2}\.\d+$/);
+  assert.ok(dash.includes(`aria-label="Version" class="pointer-events-none fixed bottom-2 right-3 z-10 select-none font-mono text-[11px] text-faint opacity-60">v${version}<`));
 
   // Planification
   assert.match((await submit("/", "Enregistrer", { cronExpression: "pas un cron", cronEnabled: "on" })).headers.get("location") ?? "", /error=/);
