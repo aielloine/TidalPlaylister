@@ -9,6 +9,7 @@ import {
   createPlaylist,
   deleteMapping,
   ignoreGenre,
+  unmapGenre,
   mergePlaylists,
   saveIgnoredGenres,
   setMappingPriority,
@@ -18,7 +19,8 @@ import { Examples } from "@/components/Preview";
 import GenrePicker from "@/components/GenrePicker";
 import IgnoredGenres from "@/components/IgnoredGenres";
 import MappingChip from "@/components/MappingChip";
-import UnmappedGenres from "@/components/UnmappedGenres";
+import { GenreProvider, GenreTag } from "@/components/Genres";
+import TrackList from "@/components/TrackList";
 import { Cover, coverSrc, Icon, Mono, PlainCover, SectionTitle } from "@/components/ui";
 import { getSettings, prisma } from "@/lib/db";
 import { deezerGenreList } from "@/lib/deezer";
@@ -28,6 +30,7 @@ import { lastfmEnabled } from "@/lib/lastfm";
 import { MOODS, moodTags } from "@/lib/moods";
 import { moodCounts, suggestPlaylists, type Suggestion } from "@/lib/suggestions";
 import { getPlaylists, getTidalGenres, type Playlist } from "@/lib/tidal";
+import { classifiedTracks } from "@/lib/tracks";
 
 export const dynamic = "force-dynamic";
 
@@ -133,6 +136,14 @@ export default async function Playlists({ searchParams }: { searchParams: Promis
   const suggestions = suggestPlaylists(unsorted, mapped, ignored, playlistNames);
   const top = suggestions.slice(0, TOP_SUGGESTIONS);
   const perMood = moodCounts(suggestions);
+  // Titres classés par l'appli, regroupés par playlist (liste sous chaque carte).
+  const tracks = await classifiedTracks(settings.ignoredGenres, new Map(playlists.map((p) => [p.id, p.name])));
+  const tracksOf = Map.groupBy(tracks, (t) => t.playlistId);
+  const menuPlaylists = playlists.map((p) => {
+    const own = mappings.filter((m) => m.playlistId === p.id);
+    return { ...p, sub: own.length ? coverSub(own) : null };
+  });
+  const genreMap = Object.fromEntries(mappings.map((m) => [m.genre, { playlistId: m.playlistId, playlistName: m.playlistName, priority: m.priority }]));
   const catalog = MOODS.map((m, i) => ({ m, i, count: perMood.get(i) ?? 0 })).sort((a, b) => b.count - a.count || a.i - b.i);
 
   // Autocomplétion : genres Tidal + Deezer + rencontrés sur vos titres, hors genres déjà mappés.
@@ -142,209 +153,223 @@ export default async function Playlists({ searchParams }: { searchParams: Promis
     .sort();
 
   return (
-    <main className="mx-auto flex max-w-[1280px] flex-col gap-4 px-[clamp(16px,3vw,32px)] pb-16 pt-7">
-      <Header>
-        <form action={createPlaylist} className="flex max-w-[480px] flex-[1_1_360px] gap-2">
-          <label className="flex h-12 min-w-0 flex-1 items-center gap-2.5 rounded-full border border-[#2a303a] bg-hollow px-3.5 focus-within:border-aqua">
-            <Icon name="plus" size={16} strokeWidth={2} className="text-muted" />
-            <span className="sr-only">Nom de la nouvelle playlist Tidal</span>
-            <input
-              name="name"
-              required
-              placeholder="Nouvelle playlist Tidal…"
-              className="h-full min-w-0 flex-1 border-0 bg-transparent text-[14.5px] text-ink outline-none placeholder:text-faint"
-            />
-          </label>
-          <Button type="submit" variant="contained" sx={{ minHeight: 48, boxShadow: "none" }}>
-            Créer
-          </Button>
-        </form>
-      </Header>
+    <GenreProvider
+      mappings={genreMap}
+      pruneMismatched={settings.pruneMismatched}
+      playlists={menuPlaylists}
+      assign={assignGenre}
+      ignore={ignoreGenre}
+      unmap={unmapGenre}
+    >
+      <main className="mx-auto flex max-w-[1280px] flex-col gap-4 px-[clamp(16px,3vw,32px)] pb-16 pt-7">
+        <Header>
+          <form action={createPlaylist} className="flex max-w-[480px] flex-[1_1_360px] gap-2">
+            <label className="flex h-12 min-w-0 flex-1 items-center gap-2.5 rounded-full border border-[#2a303a] bg-hollow px-3.5 focus-within:border-aqua">
+              <Icon name="plus" size={16} strokeWidth={2} className="text-muted" />
+              <span className="sr-only">Nom de la nouvelle playlist Tidal</span>
+              <input
+                name="name"
+                required
+                placeholder="Nouvelle playlist Tidal…"
+                className="h-full min-w-0 flex-1 border-0 bg-transparent text-[14.5px] text-ink outline-none placeholder:text-faint"
+              />
+            </label>
+            <Button type="submit" variant="contained" sx={{ minHeight: 48, boxShadow: "none" }}>
+              Créer
+            </Button>
+          </form>
+        </Header>
 
-      {actionError && <Alert severity="error">{actionError}</Alert>}
-      {notice && <Alert severity="success">{notice}</Alert>}
-      {error && <Alert severity="error">Lecture des playlists impossible : {error}</Alert>}
-      {!ok(tidalGenres).length && !ok(deezer).length && (
-        <Alert severity="warning">
-          Listes de genres Tidal et Deezer indisponibles
-          {deezer.status === "rejected" && ` (Deezer : ${(deezer.reason as Error).message})`}.
-        </Alert>
-      )}
-      {!lastfmEnabled() && <LastfmNote />}
-      {!genres.length && (
-        <Alert severity="info" icon={<Icon name="info" strokeWidth={2} className="text-lilac-soft" />}>
-          Lancez un dry run depuis le dashboard : les genres de vos favoris remonteront ici, avec des idées de playlists pour les ranger.
-        </Alert>
-      )}
+        {actionError && <Alert severity="error">{actionError}</Alert>}
+        {notice && <Alert severity="success">{notice}</Alert>}
+        {error && <Alert severity="error">Lecture des playlists impossible : {error}</Alert>}
+        {!ok(tidalGenres).length && !ok(deezer).length && (
+          <Alert severity="warning">
+            Listes de genres Tidal et Deezer indisponibles
+            {deezer.status === "rejected" && ` (Deezer : ${(deezer.reason as Error).message})`}.
+          </Alert>
+        )}
+        {!lastfmEnabled() && <LastfmNote />}
+        {!genres.length && (
+          <Alert severity="info" icon={<Icon name="info" strokeWidth={2} className="text-lilac-soft" />}>
+            Lancez un dry run depuis le dashboard : les genres de vos favoris remonteront ici, avec des idées de playlists pour les ranger.
+          </Alert>
+        )}
 
-      {top.length > 0 && <Suggestions top={top} rest={suggestions.slice(TOP_SUGGESTIONS)} unsortedCount={unsorted.length} targets={targets} />}
+        {top.length > 0 && <Suggestions top={top} rest={suggestions.slice(TOP_SUGGESTIONS)} unsortedCount={unsorted.length} targets={targets} />}
 
-      {unmapped.length > 0 && (
-        <details className="group rounded-[18px] border border-edge bg-stage">
-          <summary className="flex min-h-12 cursor-pointer list-none flex-wrap items-center gap-x-2.5 gap-y-1 px-[18px] py-2 text-[14.5px] font-semibold text-soft hover:text-ink">
-            <Icon name="plus" size={15} strokeWidth={2.2} className="transition-transform group-open:rotate-45" />
-            <span id="unmapped-title">Genres détectés non mappés</span>
-            <span className="inline-flex h-6 items-center rounded-full bg-amber/13 px-2.5 font-mono text-[12.5px] font-semibold text-amber">{unmapped.length}</span>
-            <span className="ml-auto text-xs font-normal text-muted">
-              <span className="group-open:hidden">Afficher</span>
-              <span className="hidden group-open:inline">Masquer</span>
-            </span>
-          </summary>
-          <div className="flex flex-col gap-3 border-t border-edge p-[18px]">
-            <span className="text-[13px] text-muted">
-              Rencontrés pendant les synchros. Cliquez sur un genre pour écouter des exemples, l&apos;associer à une playlist ou l&apos;ignorer.
-            </span>
-            <UnmappedGenres
-              genres={unmapped}
-              playlists={playlists.map((p) => {
-                const own = mappings.filter((m) => m.playlistId === p.id);
-                return { ...p, sub: own.length ? coverSub(own) : null };
-              })}
-              assign={assignGenre}
-              ignore={ignoreGenre}
-            />
-          </div>
-        </details>
-      )}
-
-      <div className="flex flex-wrap items-stretch gap-4">
-        <Card component="section" aria-labelledby="moods-title" className="flex min-w-0 flex-[3_1_520px] flex-col gap-3.5 p-[22px]">
-          <div className="flex flex-col gap-1">
-            <SectionTitle id="moods-title">Playlists d&apos;ambiance</SectionTitle>
-            <p className="m-0 text-[13.5px] text-muted">
-              Un clic crée la playlist (ou réutilise celle du même nom) et y mappe les tags encore libres. « Ajouter à… » les met plutôt dans une
-              playlist existante.
-            </p>
-          </div>
-          <ul className="tp-scroll m-0 flex max-h-[560px] list-none flex-col gap-1 overflow-auto p-0">
-            {catalog.map(({ m, i, count }) => {
-              const exists = playlistNames.has(m.name.toLowerCase());
-              return (
-                <li key={m.name}>
-                  <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 rounded-[14px] bg-raised p-2.5">
-                    <Cover name={m.name} sub={moodSub(m)} size={52} />
-                    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-[15px] font-semibold">{m.name}</span>
-                        <span className="inline-flex h-5 items-center rounded-md border border-line bg-hollow px-1.5 font-mono text-[11px] text-dim">prio {m.priority}</span>
-                        {exists && <span className="text-xs text-[#6ee7a0]">· existe déjà</span>}
-                        {count > 0 && <span className="text-xs font-semibold text-amber">· {plural(count, "favori")} à ranger</span>}
-                      </div>
-                      <span className="truncate text-[12.5px] text-muted">{moodTags(m).map(([t]) => t).join(", ")}</span>
-                      <Examples tags={moodTags(m).map(([t]) => t)} className="mt-1" />
-                    </div>
-                    <div className="ml-auto flex items-center gap-2">
-                      <form action={applyMood.bind(null, i)} aria-label={`${exists ? "Compléter" : "Créer"} ${m.name}`}>
-                        <Button type="submit" size="small" variant={exists ? "outlined" : "contained"} color={exists ? "inherit" : "primary"} sx={{ boxShadow: "none" }}>
-                          {exists ? "Compléter" : "Créer"}
-                        </Button>
-                      </form>
-                      <AddToPlaylist action={applyIdeaTo.bind(null, `mood:${i}`)} playlists={targets} label={`Ajouter « ${m.name} » à une playlist existante`} />
-                    </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </Card>
-
-        <Card component="section" aria-labelledby="ignored-title" className="flex min-w-0 flex-[2_1_360px] flex-col gap-3.5 p-[22px]">
-          <div className="flex flex-col gap-1">
-            <SectionTitle id="ignored-title">Genres ignorés</SectionTitle>
-            <p className="m-0 text-[13.5px] text-muted">
-              Jamais utilisés pour classer un titre. Une source Tidal/Deezer avec plus de 4 genres est traitée comme une compilation : on passe au repli
-              suivant.
-            </p>
-          </div>
-          <IgnoredGenres action={saveIgnoredGenres} initial={ignoredList} />
-        </Card>
-      </div>
-
-      <div className="mt-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
-        <h2 className="m-0 font-display text-[26px] font-bold tracking-[-0.02em]">
-          Mes playlists Tidal <span className="font-medium text-faint">· {playlists.length}</span>
-        </h2>
-        <span className="text-[13px] text-muted">Priorité : cliquez sur le nombre pour la modifier</span>
-      </div>
-
-      {playlists.length > 1 && (
-        <MergeForm
-          playlists={playlists.map((p) => {
-            const own = mappings.filter((m) => m.playlistId === p.id);
-            return { ...p, sub: own.length ? coverSub(own) : null };
-          })}
-        />
-      )}
-
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))] gap-4">
-        {playlists.map((p) => {
-          const own = mappings.filter((m) => m.playlistId === p.id);
-          const sub = coverSub(own);
-          return (
-            <Card component="article" key={p.id} className="flex flex-col gap-4 p-[18px]">
-              <div className="flex items-center gap-3.5">
-                {own.length ? <Cover name={p.name} sub={sub} size={84} /> : <PlainCover size={84} />}
-                <div className="flex min-w-0 flex-col gap-1">
-                  <h3 className="m-0 font-display text-xl font-semibold leading-[1.15] tracking-tight">{p.name}</h3>
-                  <span className="text-[13px] text-muted">
-                    {plural(p.tracks, "titre")} · {own.length ? plural(own.length, "genre") : "aucun genre"}
-                  </span>
-                  {own.length > 0 && (
-                    <a
-                      href={`${coverSrc(p.name, sub)}&download=1`}
-                      download
-                      title="Tidal ne permet pas aux applis tierces d'envoyer une pochette : téléchargez-la puis ajoutez-la à la playlist depuis l'appli Tidal."
-                      className="inline-flex items-center gap-1 self-start text-xs font-semibold text-lilac-soft no-underline hover:text-ink"
-                    >
-                      <Icon name="download" size={13} strokeWidth={2} />
-                      Télécharger la pochette
-                    </a>
-                  )}
-                </div>
-              </div>
-              {own.length ? (
-                <ul aria-label="Genres mappés" className="m-0 flex list-none flex-wrap gap-1.5 p-0">
-                  {own.map((m) => (
-                    <MappingChip
-                      key={m.id}
-                      genre={m.genre}
-                      priority={m.priority}
-                      setPriority={setMappingPriority.bind(null, m.id)}
-                      remove={deleteMapping.bind(null, m.id)}
-                    />
-                  ))}
-                </ul>
-              ) : (
-                <p className="m-0 rounded-xl border border-dashed border-[#2f3540] p-3.5 text-center text-[13.5px] text-muted">
-                  Aucun genre associé : rien ne sera classé ici.
-                </p>
-              )}
-              <GenrePicker action={addMapping.bind(null, p.id, p.name)} options={options} label={`Ajouter des genres à ${p.name}`} />
-            </Card>
-          );
-        })}
-      </div>
-
-      {orphans.length > 0 && (
-        <Alert severity="warning">
-          <span className="mr-2">Mappings vers des playlists introuvables (supprimées ?) :</span>
-          {orphans.map((m) => (
-            <form key={m.id} action={deleteMapping.bind(null, m.id)} className="m-0.5 inline-flex">
-              <span className="inline-flex h-8 items-center gap-0.5 rounded-full bg-tag pl-3 pr-1 text-[13px] text-soft">
-                {m.genre} → {m.playlistName}
-                <button
-                  type="submit"
-                  aria-label={`Supprimer le mapping ${m.genre}`}
-                  className="inline-flex size-[26px] cursor-pointer items-center justify-center rounded-full border-0 bg-transparent text-muted hover:text-ink"
-                >
-                  <Icon name="x" size={12} strokeWidth={2.4} />
-                </button>
+        {unmapped.length > 0 && (
+          <details className="group rounded-[18px] border border-edge bg-stage">
+            <summary className="flex min-h-12 cursor-pointer list-none flex-wrap items-center gap-x-2.5 gap-y-1 px-[18px] py-2 text-[14.5px] font-semibold text-soft hover:text-ink">
+              <Icon name="plus" size={15} strokeWidth={2.2} className="transition-transform group-open:rotate-45" />
+              <span id="unmapped-title">Genres détectés non mappés</span>
+              <span className="inline-flex h-6 items-center rounded-full bg-amber/13 px-2.5 font-mono text-[12.5px] font-semibold text-amber">{unmapped.length}</span>
+              <span className="ml-auto text-xs font-normal text-muted">
+                <span className="group-open:hidden">Afficher</span>
+                <span className="hidden group-open:inline">Masquer</span>
               </span>
-            </form>
-          ))}
-        </Alert>
-      )}
-    </main>
+            </summary>
+            <div className="flex flex-col gap-3 border-t border-edge p-[18px]">
+              <span className="text-[13px] text-muted">
+                Rencontrés pendant les synchros. Cliquez sur un genre pour écouter des exemples, l&apos;associer à une playlist ou l&apos;ignorer.
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {unmapped.map((g) => (
+                  <GenreTag key={g.name} genre={g.name} count={g.count} size="md" />
+                ))}
+              </div>
+            </div>
+          </details>
+        )}
+
+        <div className="flex flex-wrap items-stretch gap-4">
+          <Card component="section" aria-labelledby="moods-title" className="flex min-w-0 flex-[3_1_520px] flex-col gap-3.5 p-[22px]">
+            <div className="flex flex-col gap-1">
+              <SectionTitle id="moods-title">Playlists d&apos;ambiance</SectionTitle>
+              <p className="m-0 text-[13.5px] text-muted">
+                Un clic crée la playlist (ou réutilise celle du même nom) et y mappe les tags encore libres. « Ajouter à… » les met plutôt dans une
+                playlist existante.
+              </p>
+            </div>
+            <ul className="tp-scroll m-0 flex max-h-[560px] list-none flex-col gap-1 overflow-auto p-0">
+              {catalog.map(({ m, i, count }) => {
+                const exists = playlistNames.has(m.name.toLowerCase());
+                return (
+                  <li key={m.name}>
+                    <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 rounded-[14px] bg-raised p-2.5">
+                      <Cover name={m.name} sub={moodSub(m)} size={52} />
+                      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-[15px] font-semibold">{m.name}</span>
+                          <span className="inline-flex h-5 items-center rounded-md border border-line bg-hollow px-1.5 font-mono text-[11px] text-dim">prio {m.priority}</span>
+                          {exists && <span className="text-xs text-[#6ee7a0]">· existe déjà</span>}
+                          {count > 0 && <span className="text-xs font-semibold text-amber">· {plural(count, "favori")} à ranger</span>}
+                        </div>
+                        <span className="truncate text-[12.5px] text-muted">{moodTags(m).map(([t]) => t).join(", ")}</span>
+                        <Examples tags={moodTags(m).map(([t]) => t)} className="mt-1" />
+                      </div>
+                      <div className="ml-auto flex items-center gap-2">
+                        <form action={applyMood.bind(null, i)} aria-label={`${exists ? "Compléter" : "Créer"} ${m.name}`}>
+                          <Button type="submit" size="small" variant={exists ? "outlined" : "contained"} color={exists ? "inherit" : "primary"} sx={{ boxShadow: "none" }}>
+                            {exists ? "Compléter" : "Créer"}
+                          </Button>
+                        </form>
+                        <AddToPlaylist action={applyIdeaTo.bind(null, `mood:${i}`)} playlists={targets} label={`Ajouter « ${m.name} » à une playlist existante`} />
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </Card>
+
+          <Card component="section" aria-labelledby="ignored-title" className="flex min-w-0 flex-[2_1_360px] flex-col gap-3.5 p-[22px]">
+            <div className="flex flex-col gap-1">
+              <SectionTitle id="ignored-title">Genres ignorés</SectionTitle>
+              <p className="m-0 text-[13.5px] text-muted">
+                Jamais utilisés pour classer un titre. Une source Tidal/Deezer avec plus de 4 genres est traitée comme une compilation : on passe au repli
+                suivant.
+              </p>
+            </div>
+            <IgnoredGenres action={saveIgnoredGenres} initial={ignoredList} />
+          </Card>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
+          <h2 className="m-0 font-display text-[26px] font-bold tracking-[-0.02em]">
+            Mes playlists Tidal <span className="font-medium text-faint">· {playlists.length}</span>
+          </h2>
+          <span className="text-[13px] text-muted">Priorité : cliquez sur le nombre pour la modifier</span>
+        </div>
+
+        {playlists.length > 1 && <MergeForm playlists={menuPlaylists} />}
+
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))] gap-4">
+          {playlists.map((p) => {
+            const own = mappings.filter((m) => m.playlistId === p.id);
+            const sub = coverSub(own);
+            return (
+              <Card component="article" key={p.id} className="flex flex-col gap-4 p-[18px]">
+                <div className="flex items-center gap-3.5">
+                  {own.length ? <Cover name={p.name} sub={sub} size={84} /> : <PlainCover size={84} />}
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <h3 className="m-0 font-display text-xl font-semibold leading-[1.15] tracking-tight">{p.name}</h3>
+                    <span className="text-[13px] text-muted">
+                      {plural(p.tracks, "titre")} · {own.length ? plural(own.length, "genre") : "aucun genre"}
+                    </span>
+                    {own.length > 0 && (
+                      <a
+                        href={`${coverSrc(p.name, sub)}&download=1`}
+                        download
+                        title="Tidal ne permet pas aux applis tierces d'envoyer une pochette : téléchargez-la puis ajoutez-la à la playlist depuis l'appli Tidal."
+                        className="inline-flex items-center gap-1 self-start text-xs font-semibold text-lilac-soft no-underline hover:text-ink"
+                      >
+                        <Icon name="download" size={13} strokeWidth={2} />
+                        Télécharger la pochette
+                      </a>
+                    )}
+                  </div>
+                </div>
+                {own.length ? (
+                  <ul aria-label="Genres mappés" className="m-0 flex list-none flex-wrap gap-1.5 p-0">
+                    {own.map((m) => (
+                      <MappingChip
+                        key={m.id}
+                        genre={m.genre}
+                        priority={m.priority}
+                        setPriority={setMappingPriority.bind(null, m.id)}
+                        remove={deleteMapping.bind(null, m.id)}
+                      />
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="m-0 rounded-xl border border-dashed border-[#2f3540] p-3.5 text-center text-[13.5px] text-muted">
+                    Aucun genre associé : rien ne sera classé ici.
+                  </p>
+                )}
+                <GenrePicker action={addMapping.bind(null, p.id, p.name)} options={options} label={`Ajouter des genres à ${p.name}`} />
+                {(tracksOf.get(p.id)?.length ?? 0) > 0 && (
+                  <details className="group rounded-[14px] border border-edge">
+                    <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-3.5 text-[13.5px] font-semibold text-soft hover:text-ink">
+                      <Icon name="note" size={15} strokeWidth={2} />
+                      Titres classés par l&apos;appli
+                      <span className="font-mono text-[12px] text-faint">{tracksOf.get(p.id)!.length}</span>
+                      <span className="ml-auto text-xs font-normal text-muted">
+                        <span className="group-open:hidden">Afficher</span>
+                        <span className="hidden group-open:inline">Masquer</span>
+                      </span>
+                    </summary>
+                    <div className="border-t border-edge p-2.5">
+                      <TrackList tracks={tracksOf.get(p.id)!} compact label={`Titres classés dans ${p.name}`} />
+                    </div>
+                  </details>
+                )}
+              </Card>
+            );
+          })}
+        </div>
+
+        {orphans.length > 0 && (
+          <Alert severity="warning">
+            <span className="mr-2">Mappings vers des playlists introuvables (supprimées ?) :</span>
+            {orphans.map((m) => (
+              <form key={m.id} action={deleteMapping.bind(null, m.id)} className="m-0.5 inline-flex">
+                <span className="inline-flex h-8 items-center gap-0.5 rounded-full bg-tag pl-3 pr-1 text-[13px] text-soft">
+                  {m.genre} → {m.playlistName}
+                  <button
+                    type="submit"
+                    aria-label={`Supprimer le mapping ${m.genre}`}
+                    className="inline-flex size-[26px] cursor-pointer items-center justify-center rounded-full border-0 bg-transparent text-muted hover:text-ink"
+                  >
+                    <Icon name="x" size={12} strokeWidth={2.4} />
+                  </button>
+                </span>
+              </form>
+            ))}
+          </Alert>
+        )}
+      </main>
+    </GenreProvider>
   );
 }
 
@@ -397,9 +422,7 @@ function Suggestions({ top, rest, unsortedCount, targets }: { top: Suggestion[];
               </div>
               <div className="flex flex-wrap gap-1">
                 {s.tags.slice(0, 5).map((t) => (
-                  <span key={t} className="inline-flex h-6 items-center rounded-full border border-[#2a303a] px-2 text-xs text-soft">
-                    {t}
-                  </span>
+                  <GenreTag key={t} genre={t} />
                 ))}
                 {s.tags.length > 5 && <span className="text-xs leading-6 text-faint">+{s.tags.length - 5}</span>}
               </div>
