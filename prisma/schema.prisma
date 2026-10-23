@@ -57,6 +57,13 @@ model UnsortedTrack {
   genres  String // tableau JSON de genres normalisés
 }
 
+// Nom choisi pour une idée de playlist (ambiance du catalogue ou genre fréquent), utilisé à sa création.
+// key : "mood:<nom du catalogue>" ou "genre:<genre>" (stable même si le catalogue est réordonné).
+model IdeaName {
+  key  String @id
+  name String
+}
+
 // Un genre (ou tag Last.fm) -> une playlist. Plusieurs genres peuvent pointer vers la même playlist.
 // Quand un titre a plusieurs genres mappés, le plus prioritaire gagne (spécifique avant générique).
 model Mapping {
