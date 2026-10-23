@@ -56,6 +56,10 @@ Sur `/playlists` :
   `data/fonts` ; à défaut, police par défaut.
 
 Dans les logs, ▶ joue un **extrait de 30 s** (Deezer, retrouvé par ISRC) et ↗ ouvre le titre dans Tidal.
+Chaque ligne d'un titre affiche **tous ses genres** en chips, même s'il a été classé (celui qui a décidé du
+classement en tête, en couleur ; les non mappés en pointillés). Un clic sur un genre : exemples à écouter, playlist
+actuelle, **changer de playlist** (ou démapper, ignorer), et « Voir les titres de ce genre dans les logs ». Avec
+« Ranger à nouveau », les titres déjà classés suivent le nouveau mapping à la synchro suivante.
 
 ## Prérequis Tidal
 1. Créer une app sur https://developer.tidal.com/dashboard
@@ -70,6 +74,11 @@ TIDAL_DIR=/volume1/docker/tidalplaylister docker compose up -d
 ```
 Au premier accès : création du compte admin → « Se connecter à Tidal » → mapper des genres sur `/playlists`
 → lancer un Dry Run depuis le dashboard avant d'activer le mode réel.
+
+## Version
+Affichée discrètement en bas à droite : champ `version` de `package.json`, au format `année.mois.n` où `n` est
+le numéro de version dans l'année (0, 1, 2…, remis à 0 chaque 1er janvier) — ex. `2026.10.0`, puis `2026.10.1`,
+`2026.11.2`, `2027.1.0`. À incrémenter dans chaque PR.
 
 ## Dev
 ```sh

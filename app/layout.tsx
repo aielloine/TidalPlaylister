@@ -22,6 +22,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <Nav />
           {children}
         </Providers>
+        {/* Version : package.json (année.mois.n° de version de l'année), injectée par next.config.ts. */}
+        <span
+          aria-label="Version"
+          className="pointer-events-none fixed bottom-2 right-3 z-10 select-none font-mono text-[11px] text-faint opacity-60"
+        >
+          v{process.env.NEXT_PUBLIC_APP_VERSION}
+        </span>
       </body>
     </html>
   );
