@@ -28,7 +28,9 @@ Dans les deux cas :
 ré-évalués avec leurs genres mémorisés. Si un changement de mapping (genre supprimé, réassigné, ignoré…) les mène
 ailleurs, ils changent de playlist ; s'ils ne correspondent plus à rien, ils sont retirés de la playlist et remis
 en favori. Seules les playlists encore mappées sont concernées, et jamais un titre retiré à la main ou présent
-avant l'appli. Les titres classés avant cette fonction sont ré-analysés par lots de 200 par passage.
+avant l'appli. Les titres classés avant cette fonction sont ré-analysés par lots de 200 par passage ; ceux que
+Tidal ne renvoie plus (retirés du catalogue, indisponibles dans le pays) restent dans leur playlist, marqués « genres
+inconnus », et ne sont plus jamais déplacés.
 
 « Favoris analysés par passage » : les N favoris les plus récents (300 par défaut), **identique en dry run et en
 réel** ; 0 = tous. Les titres déjà classés ne sont pas ré-analysés, donc « tous » reste rapide après le 1er passage.
