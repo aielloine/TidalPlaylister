@@ -187,6 +187,13 @@ export async function removeFromPlaylist(playlistId: string, entries: { trackId:
     });
 }
 
+export async function renamePlaylist(playlistId: string, name: string) {
+  await api(`/playlists/${playlistId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ data: { id: playlistId, type: "playlists", attributes: { name } } }),
+  });
+}
+
 // Supprime une playlist (fusion). Les pochettes ne sont pas gérées ici : POST /artworks est refusé aux accès
 // tiers (« Access tier is insufficient »), elles se téléchargent depuis l'appli et se posent à la main.
 export async function deletePlaylist(playlistId: string) {

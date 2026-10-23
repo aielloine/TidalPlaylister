@@ -8,7 +8,7 @@ import { getSettings, prisma } from "@/lib/db";
 import { defaultPriority, normGenre, parseList } from "@/lib/genres";
 import { coverSub } from "@/lib/coverImage";
 import { MOODS, moodTags } from "@/lib/moods";
-import { titleCase } from "@/lib/suggestions";
+import { nameKey, titleCase } from "@/lib/suggestions";
 import { startScheduler } from "@/lib/scheduler";
 import { isSyncRunning, runSync } from "@/lib/sync";
 import * as tidal from "@/lib/tidal";
@@ -122,7 +122,8 @@ async function createAndMap(name: string, wanted: [string, number][], existing?:
 }
 
 // Clé d'idée : "mood:<index>" (catalogue) ou "genre:<nom>" (playlist au nom d'un genre détecté).
-function idea(key: string): [string, [string, number][]] | null {
+// Nom proposé par l'appli, avant renommage éventuel.
+function baseIdea(key: string): [string, [string, number][]] | null {
   if (key.startsWith("mood:")) {
     const mood = MOODS[Number(key.slice(5))];
     return mood ? [mood.name, moodTags(mood)] : null;
@@ -134,16 +135,72 @@ function idea(key: string): [string, [string, number][]] | null {
   return null;
 }
 
+const ideaKey = (key: string) => (key.startsWith("genre:") ? `genre:${normGenre(key.slice(6))}` : nameKey(key));
+
+// Idée avec le nom choisi par l'utilisateur s'il l'a renommée.
+async function idea(key: string): Promise<[string, [string, number][]] | null> {
+  const base = baseIdea(key);
+  if (!base) return null;
+  const custom = await prisma.ideaName.findUnique({ where: { key: ideaKey(key) } });
+  return [custom?.name ?? base[0], base[1]];
+}
+
+// Enregistre (ou oublie) le nom d'une idée. Vide ou identique au nom proposé : retour au nom proposé.
+async function setIdeaName(key: string, defaultName: string, name: string) {
+  if (!name || name === defaultName) await prisma.ideaName.deleteMany({ where: { key } });
+  else await prisma.ideaName.upsert({ where: { key }, update: { name }, create: { key, name } });
+}
+
+const MAX_NAME = 100;
+
+// Renomme une idée proposée (ambiance ou genre fréquent) : la playlist sera créée sous ce nom.
+export async function renameIdea(key: string, f: FormData) {
+  await requireUser();
+  const base = baseIdea(key);
+  if (base) await setIdeaName(ideaKey(key), base[0], str(f, "name").slice(0, MAX_NAME));
+  revalidatePath("/playlists");
+}
+
+// Renomme une playlist sur Tidal. Les idées qui portaient son ancien nom le suivent, pour que « Compléter »
+// retrouve toujours la playlist au lieu d'en recréer une sous l'ancien nom.
+export async function renamePlaylist(playlistId: string, f: FormData) {
+  await requireUser();
+  const name = str(f, "name").slice(0, MAX_NAME);
+  let error = "";
+  let old: string | undefined;
+  try {
+    old = (await tidal.getPlaylists()).find((p) => p.id === playlistId)?.name;
+    if (old === undefined) throw new Error("playlist introuvable");
+    if (name && name !== old) await tidal.renamePlaylist(playlistId, name);
+  } catch (e) {
+    error = (e as Error).message;
+  }
+  if (error) redirect(`/playlists?error=${encodeURIComponent(`Renommage impossible : ${error}`)}`);
+  if (name && old !== undefined && name !== old) {
+    await prisma.mapping.updateMany({ where: { playlistId }, data: { playlistName: name } });
+    const custom = new Map((await prisma.ideaName.findMany()).map((r) => [r.key, r.name]));
+    const defaults = new Map<string, string>([
+      ...MOODS.map((m): [string, string] => [`mood:${m.name}`, m.name]),
+      ...(await prisma.genre.findMany({ select: { name: true } })).map((g): [string, string] => [`genre:${g.name}`, titleCase(g.name)]),
+    ]);
+    for (const k of custom.keys()) if (!defaults.has(k)) defaults.set(k, k.startsWith("genre:") ? titleCase(k.slice(6)) : k.slice(5));
+    for (const [k, def] of defaults)
+      if ((custom.get(k) ?? def).toLowerCase() === old.toLowerCase()) await setIdeaName(k, def, name);
+  }
+  revalidatePath("/playlists");
+  revalidatePath("/");
+}
+
 export async function applyMood(index: number) {
   await requireUser();
-  const i = idea(`mood:${index}`);
+  const i = await idea(`mood:${index}`);
   if (i) await createAndMap(...i);
   revalidatePath("/playlists");
 }
 
 export async function applySuggestion(key: string) {
   await requireUser();
-  const i = idea(key);
+  const i = await idea(key);
   if (i) await createAndMap(...i);
   revalidatePath("/playlists");
 }
@@ -151,7 +208,7 @@ export async function applySuggestion(key: string) {
 // « Ajouter à… » : les tags encore libres d'une idée vont dans une playlist existante (aucune création).
 export async function applyIdeaTo(key: string, f: FormData) {
   await requireUser();
-  const i = idea(key);
+  const i = baseIdea(key);
   const playlistId = str(f, "playlistId");
   const target = playlistId ? (await tidal.getPlaylists()).find((p) => p.id === playlistId) : undefined;
   if (i && target) await mapFree(target.id, target.name, i[1]);
@@ -163,7 +220,7 @@ export async function applySuggestions(f: FormData) {
   await requireUser();
   const playlists = await tidal.getPlaylists();
   for (const key of f.getAll("key").map(String)) {
-    const i = idea(key);
+    const i = await idea(key);
     if (i) await createAndMap(i[0], i[1], playlists);
   }
   revalidatePath("/playlists");
