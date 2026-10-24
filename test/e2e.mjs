@@ -280,6 +280,9 @@ try {
   // Playlists (pagination) + création + mappings
   const pl = await page("/playlists");
   assert.ok(pl.includes(">Rock<") && pl.includes(">Jazz<"), "playlists des 2 pages affichées");
+  // Trois onglets (playlists, idées, genres) et l'explication des priorités
+  assert.match(pl, /role="tablist" aria-label="Sections"[\s\S]*?Mes playlists[\s\S]*?Idées[\s\S]*?Genres/);
+  assert.match(pl, /Comment la priorité choisit la playlist d&#x27;un titre[\s\S]*?la priorité la plus haute/);
   await submit("/playlists", "Créer", { name: "Nouvelle" });
   assert.deepEqual(state.created, ["Nouvelle"]);
   await submit("/playlists", "Ajouter des genres à Rock", { genres: "Rock" });
@@ -367,7 +370,7 @@ try {
   // Genres détectés proposés au mapping
   const pl3 = await page("/playlists");
   assert.match(pl3, /Genres détectés non mappés[\s\S]*electro[\s\S]*reggae/);
-  const unmappedCard = pl3.slice(pl3.indexOf("Genres détectés non mappés"), pl3.indexOf("Playlists d"));
+  const unmappedCard = pl3.slice(pl3.indexOf("Genres détectés non mappés"), pl3.indexOf('id="ignored-title"'));
   assert.ok(unmappedCard.includes("artist tag") && !unmappedCard.includes("musiques de films"), "genres ignorés masqués");
   assert.equal(state.deezerIsrcs.filter((i) => i === "ISRC5").length, 1); // cache : pas de 2e appel au 2e passage
 
@@ -379,7 +382,7 @@ try {
   assert.deepEqual(state.created.slice(2), ["Artist Tag", "Électro chill", "Reggae / dancehall"]);
   const pl4 = await page("/playlists");
   assert.doesNotMatch(pl4, /Idées de playlists/); // tous leurs tags sont maintenant mappés
-  assert.doesNotMatch(pl4.slice(pl4.indexOf("Genres détectés non mappés"), pl4.indexOf("Playlists d")), /artist tag/);
+  assert.doesNotMatch(pl4.slice(pl4.indexOf("Genres détectés non mappés"), pl4.indexOf('id="ignored-title"')), /artist tag/);
   // Sous chaque playlist : ses titres classés, tags cliquables ; « artist tag » les enverra ailleurs au prochain passage
   const rockTracks = pl4.slice(pl4.indexOf('aria-label="Titres classés dans Rock"'));
   assert.match(rockTracks, /Song Nine<[\s\S]*?title="artist tag → « Artist Tag » · cliquer pour changer"[\s\S]*?→ Artist Tag à la prochaine synchro/);
@@ -450,6 +453,7 @@ try {
   assert.ok(!pl7.includes(">Électro chill</h3>") && !pl7.includes(">Reggae / dancehall</h3>"));
   const rockCard = pl7.slice(pl7.indexOf(">Rock</h3>"), pl7.indexOf("Ajouter des genres à Rock"));
   assert.ok(rockCard.includes('aria-label="Retirer electro"') && rockCard.includes('aria-label="Retirer reggae"'), "genres transférés");
+  assert.match(rockCard, /Voir \d+ autres genres/); // au-delà de 8 genres, le reste est replié
   // Le suivi a suivi : la synchro suivante ne déplace ni ne retire t4/t5
   await submit("/", "Synchronisation réelle");
   await waitIdle();
@@ -512,7 +516,7 @@ try {
   // Version discrète en bas à droite, celle de package.json
   const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   assert.match(version, /^\d{4}\.\d{1,2}\.\d+$/);
-  assert.ok(dash.includes(`aria-label="Version" class="pointer-events-none fixed bottom-2 right-3 z-10 select-none font-mono text-[11px] text-faint opacity-60">v${version}<`));
+  assert.match(dash, new RegExp(`<footer[^>]*><span aria-label="Version"[^>]*>v${version.replaceAll(".", "\\.")}</span></footer>`));
 
   // Planification
   assert.match((await submit("/", "Enregistrer", { cronExpression: "pas un cron", cronEnabled: "on" })).headers.get("location") ?? "", /error=/);
