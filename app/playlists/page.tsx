@@ -17,12 +17,16 @@ import {
   setMappingPriority,
 } from "@/app/actions";
 import AddToPlaylist from "@/components/AddToPlaylist";
+import ExpandRow from "@/components/ExpandRow";
 import { Examples } from "@/components/Preview";
 import GenrePicker from "@/components/GenrePicker";
 import IgnoredGenres from "@/components/IgnoredGenres";
 import MappingChip from "@/components/MappingChip";
+import Panels from "@/components/Panels";
+import PriorityHelp from "@/components/PriorityHelp";
 import RenameForm from "@/components/RenameForm";
 import { GenreProvider, GenreTag } from "@/components/Genres";
+import Tabs from "@/components/Tabs";
 import TrackList from "@/components/TrackList";
 import { Cover, coverSrc, Icon, Mono, PlainCover, SectionTitle } from "@/components/ui";
 import { getSettings, prisma } from "@/lib/db";
@@ -33,22 +37,21 @@ import { lastfmEnabled } from "@/lib/lastfm";
 import { MOODS, moodTags } from "@/lib/moods";
 import { moodCounts, nameKey, suggestPlaylists, type Suggestion } from "@/lib/suggestions";
 import { getPlaylists, getTidalGenres, type Playlist } from "@/lib/tidal";
-import { classifiedTracks } from "@/lib/tracks";
+import { classifiedTracks, type ClassifiedTrack } from "@/lib/tracks";
 
 export const dynamic = "force-dynamic";
 
 const TOP_SUGGESTIONS = 6;
+const VISIBLE_GENRES = 8; // genres affichés d'emblée sur une carte de playlist, le reste se déplie
 const IDEA_HINT = "la playlist sera créée sous ce nom ; vide = nom proposé";
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n > 1 ? many : one}`;
 
 function Header({ children }: { children?: React.ReactNode }) {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4 pb-2">
+    <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4 pb-1">
       <div className="flex min-w-0 flex-[1_1_420px] flex-col gap-1.5">
-        <h1 className="m-0 font-display text-[clamp(28px,2.8vw,36px)] font-bold leading-[1.1] tracking-[-0.02em]">Playlists &amp; mappings</h1>
-        <p className="m-0 text-[14.5px] text-dim">
-          Chaque genre ou tag pointe vers une playlist. Quand un titre en a plusieurs, la priorité la plus haute gagne.
-        </p>
+        <h1 className="m-0 font-display text-[clamp(26px,2.8vw,36px)] font-bold leading-[1.1] tracking-[-0.02em]">Playlists &amp; mappings</h1>
+        <p className="m-0 max-w-[60ch] text-[14.5px] text-dim">Associez des genres à vos playlists Tidal : chaque favori rejoint la playlist de son genre.</p>
       </div>
       {children}
     </div>
@@ -61,6 +64,18 @@ const LastfmNote = () => (
     last.fm/api/account/create) pour des genres et ambiances bien plus fins que Tidal/Deezer.
   </Alert>
 );
+
+// Compteur dans un titre d'onglet.
+const Count = ({ n, tone = "neutral" }: { n: number; tone?: "neutral" | "amber" }) =>
+  n > 0 ? (
+    <span
+      className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 font-mono text-[11.5px] font-semibold ${
+        tone === "amber" ? "bg-amber/20 text-amber" : "bg-white/10 text-inherit"
+      }`}
+    >
+      {n}
+    </span>
+  ) : null;
 
 export default async function Playlists({ searchParams }: { searchParams: Promise<{ error?: string; notice?: string }> }) {
   const { error: actionError, notice } = await searchParams;
@@ -169,9 +184,9 @@ export default async function Playlists({ searchParams }: { searchParams: Promis
       ignore={ignoreGenre}
       unmap={unmapGenre}
     >
-      <main className="mx-auto flex max-w-[1280px] flex-col gap-4 px-[clamp(16px,3vw,32px)] pb-16 pt-7">
+      <main className="mx-auto flex max-w-[1280px] flex-col gap-4 px-[clamp(14px,3vw,32px)] pb-12 pt-6">
         <Header>
-          <form action={createPlaylist} className="flex max-w-[480px] flex-[1_1_360px] gap-2">
+          <form action={createPlaylist} className="flex max-w-[480px] flex-[1_1_320px] gap-2">
             <label className="flex h-12 min-w-0 flex-1 items-center gap-2.5 rounded-full border border-[#2a303a] bg-hollow px-3.5 focus-within:border-aqua">
               <Icon name="plus" size={16} strokeWidth={2} className="text-muted" />
               <span className="sr-only">Nom de la nouvelle playlist Tidal</span>
@@ -204,188 +219,295 @@ export default async function Playlists({ searchParams }: { searchParams: Promis
           </Alert>
         )}
 
-        {top.length > 0 && <Suggestions top={top} rest={suggestions.slice(TOP_SUGGESTIONS)} unsortedCount={unsorted.length} targets={targets} />}
-
-        {unmapped.length > 0 && (
-          <details className="group rounded-[18px] border border-edge bg-stage">
-            <summary className="flex min-h-12 cursor-pointer list-none flex-wrap items-center gap-x-2.5 gap-y-1 px-[18px] py-2 text-[14.5px] font-semibold text-soft hover:text-ink">
-              <Icon name="plus" size={15} strokeWidth={2.2} className="transition-transform group-open:rotate-45" />
-              <span id="unmapped-title">Genres détectés non mappés</span>
-              <span className="inline-flex h-6 items-center rounded-full bg-amber/13 px-2.5 font-mono text-[12.5px] font-semibold text-amber">{unmapped.length}</span>
-              <span className="ml-auto text-xs font-normal text-muted">
-                <span className="group-open:hidden">Afficher</span>
-                <span className="hidden group-open:inline">Masquer</span>
-              </span>
-            </summary>
-            <div className="flex flex-col gap-3 border-t border-edge p-[18px]">
-              <span className="text-[13px] text-muted">
-                Rencontrés pendant les synchros. Cliquez sur un genre pour écouter des exemples, l&apos;associer à une playlist ou l&apos;ignorer.
-              </span>
-              <div className="flex flex-wrap gap-2">
-                {unmapped.map((g) => (
-                  <GenreTag key={g.name} genre={g.name} count={g.count} size="md" />
-                ))}
-              </div>
-            </div>
-          </details>
-        )}
-
-        <div className="flex flex-wrap items-stretch gap-4">
-          <Card component="section" aria-labelledby="moods-title" className="flex min-w-0 flex-[3_1_520px] flex-col gap-3.5 p-[22px]">
-            <div className="flex flex-col gap-1">
-              <SectionTitle id="moods-title">Playlists d&apos;ambiance</SectionTitle>
-              <p className="m-0 text-[13.5px] text-muted">
-                Un clic crée la playlist (ou réutilise celle du même nom) et y mappe les tags encore libres. « Ajouter à… » les met plutôt dans une
-                playlist existante.
-              </p>
-            </div>
-            <ul className="tp-scroll m-0 flex max-h-[560px] list-none flex-col gap-1 overflow-auto p-0">
-              {catalog.map(({ m, i, count }) => {
-                const name = moodName(i);
-                const exists = playlistNames.has(name.toLowerCase());
-                return (
-                  <li key={m.name}>
-                    <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2 rounded-[14px] bg-raised p-2.5">
-                      <Cover name={name} sub={moodSub(m, name)} size={52} />
-                      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <RenameForm name={name} action={renameIdea.bind(null, `mood:${i}`)} label={`Renommer l'idée ${name}`} hint={IDEA_HINT} className="text-[15px] font-semibold" />
-                          <span className="inline-flex h-5 items-center rounded-md border border-line bg-hollow px-1.5 font-mono text-[11px] text-dim">prio {m.priority}</span>
-                          {exists && <span className="text-xs text-[#6ee7a0]">· existe déjà</span>}
-                          {count > 0 && <span className="text-xs font-semibold text-amber">· {plural(count, "favori")} à ranger</span>}
-                        </div>
-                        <span className="truncate text-[12.5px] text-muted">{moodTags(m).map(([t]) => t).join(", ")}</span>
-                        <Examples tags={moodTags(m).map(([t]) => t)} className="mt-1" />
-                      </div>
-                      <div className="ml-auto flex items-center gap-2">
-                        <form action={applyMood.bind(null, i)} aria-label={`${exists ? "Compléter" : "Créer"} ${name}`}>
-                          <Button type="submit" size="small" variant={exists ? "outlined" : "contained"} color={exists ? "inherit" : "primary"} sx={{ boxShadow: "none" }}>
-                            {exists ? "Compléter" : "Créer"}
-                          </Button>
-                        </form>
-                        <AddToPlaylist action={applyIdeaTo.bind(null, `mood:${i}`)} playlists={targets} label={`Ajouter « ${name} » à une playlist existante`} />
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          </Card>
-
-          <Card component="section" aria-labelledby="ignored-title" className="flex min-w-0 flex-[2_1_360px] flex-col gap-3.5 p-[22px]">
-            <div className="flex flex-col gap-1">
-              <SectionTitle id="ignored-title">Genres ignorés</SectionTitle>
-              <p className="m-0 text-[13.5px] text-muted">
-                Jamais utilisés pour classer un titre. Une source Tidal/Deezer avec plus de 4 genres est traitée comme une compilation : on passe au repli
-                suivant.
-              </p>
-            </div>
-            <IgnoredGenres action={saveIgnoredGenres} initial={ignoredList} />
-          </Card>
-        </div>
-
-        <div className="mt-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
-          <h2 className="m-0 font-display text-[26px] font-bold tracking-[-0.02em]">
-            Mes playlists Tidal <span className="font-medium text-faint">· {playlists.length}</span>
-          </h2>
-          <span className="text-[13px] text-muted">Priorité : cliquez sur le nombre pour la modifier</span>
-        </div>
-
-        {playlists.length > 1 && <MergeForm playlists={menuPlaylists} />}
-
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))] gap-4">
-          {playlists.map((p) => {
-            const own = mappings.filter((m) => m.playlistId === p.id);
-            const sub = coverSub(own);
-            return (
-              <Card component="article" key={p.id} className="flex flex-col gap-4 p-[18px]">
-                <div className="flex items-center gap-3.5">
-                  {own.length ? <Cover name={p.name} sub={sub} size={84} /> : <PlainCover size={84} />}
-                  <div className="flex min-w-0 flex-col gap-1">
-                    <RenameForm
-                      as="h3"
-                      name={p.name}
-                      action={renamePlaylist.bind(null, p.id)}
-                      label={`Renommer ${p.name}`}
-                      hint="renommée aussi sur Tidal ; genres mappés et titres classés restent attachés"
-                      className="break-words font-display text-xl font-semibold leading-[1.15] tracking-tight"
-                    />
-                    <span className="text-[13px] text-muted">
-                      {plural(p.tracks, "titre")} · {own.length ? plural(own.length, "genre") : "aucun genre"}
-                    </span>
-                    {own.length > 0 && (
-                      <a
-                        href={`${coverSrc(p.name, sub)}&download=1`}
-                        download
-                        title="Tidal ne permet pas aux applis tierces d'envoyer une pochette : téléchargez-la puis ajoutez-la à la playlist depuis l'appli Tidal."
-                        className="inline-flex items-center gap-1 self-start text-xs font-semibold text-lilac-soft no-underline hover:text-ink"
-                      >
-                        <Icon name="download" size={13} strokeWidth={2} />
-                        Télécharger la pochette
-                      </a>
-                    )}
-                  </div>
-                </div>
-                {own.length ? (
-                  <ul aria-label="Genres mappés" className="m-0 flex list-none flex-wrap gap-1.5 p-0">
-                    {own.map((m) => (
-                      <MappingChip
-                        key={m.id}
-                        genre={m.genre}
-                        priority={m.priority}
-                        setPriority={setMappingPriority.bind(null, m.id)}
-                        remove={deleteMapping.bind(null, m.id)}
+        <Tabs
+          hash
+          label="Sections"
+          tabs={[
+            {
+              key: "playlists",
+              title: (
+                <>
+                  <span className="max-sm:hidden">Mes playlists</span>
+                  <span className="sm:hidden">Playlists</span>
+                  <Count n={playlists.length} />
+                </>
+              ),
+              content: (
+                <div className="flex flex-col gap-4">
+                  <PriorityHelp />
+                  <div className="grid grid-cols-[repeat(auto-fill,minmax(min(340px,100%),1fr))] gap-4">
+                    {playlists.map((p) => (
+                      <PlaylistCard
+                        key={p.id}
+                        playlist={p}
+                        own={mappings.filter((m) => m.playlistId === p.id)}
+                        tracks={tracksOf.get(p.id) ?? []}
+                        options={options}
                       />
                     ))}
-                  </ul>
-                ) : (
-                  <p className="m-0 rounded-xl border border-dashed border-[#2f3540] p-3.5 text-center text-[13.5px] text-muted">
-                    Aucun genre associé : rien ne sera classé ici.
-                  </p>
-                )}
-                <GenrePicker action={addMapping.bind(null, p.id, p.name)} options={options} label={`Ajouter des genres à ${p.name}`} />
-                {(tracksOf.get(p.id)?.length ?? 0) > 0 && (
-                  <details className="group rounded-[14px] border border-edge">
-                    <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-3.5 text-[13.5px] font-semibold text-soft hover:text-ink">
-                      <Icon name="note" size={15} strokeWidth={2} />
-                      Titres classés par l&apos;appli
-                      <span className="font-mono text-[12px] text-faint">{tracksOf.get(p.id)!.length}</span>
-                      <span className="ml-auto text-xs font-normal text-muted">
-                        <span className="group-open:hidden">Afficher</span>
-                        <span className="hidden group-open:inline">Masquer</span>
-                      </span>
-                    </summary>
-                    <div className="border-t border-edge p-2.5">
-                      <TrackList tracks={tracksOf.get(p.id)!} compact label={`Titres classés dans ${p.name}`} />
+                  </div>
+                  {orphans.length > 0 && (
+                    <Alert severity="warning">
+                      <span className="mr-2">Mappings vers des playlists introuvables (supprimées ?) :</span>
+                      {orphans.map((m) => (
+                        <form key={m.id} action={deleteMapping.bind(null, m.id)} className="m-0.5 inline-flex">
+                          <span className="inline-flex h-8 items-center gap-0.5 rounded-full bg-tag pl-3 pr-1 text-[13px] text-soft">
+                            {m.genre} → {m.playlistName}
+                            <button
+                              type="submit"
+                              aria-label={`Supprimer le mapping ${m.genre}`}
+                              className="inline-flex size-[26px] cursor-pointer items-center justify-center rounded-full border-0 bg-transparent text-muted hover:text-ink"
+                            >
+                              <Icon name="x" size={12} strokeWidth={2.4} />
+                            </button>
+                          </span>
+                        </form>
+                      ))}
+                    </Alert>
+                  )}
+                  {playlists.length > 1 && <MergeForm playlists={menuPlaylists} />}
+                </div>
+              ),
+            },
+            {
+              key: "idees",
+              title: (
+                <>
+                  Idées
+                  <Count n={unsorted.length} tone="amber" />
+                </>
+              ),
+              content: (
+                <div className="flex flex-col gap-4">
+                  {top.length > 0 ? (
+                    <Suggestions top={top} rest={suggestions.slice(TOP_SUGGESTIONS)} unsortedCount={unsorted.length} targets={targets} />
+                  ) : (
+                    <p className="m-0 rounded-[18px] border border-dashed border-[#2f3540] px-4 py-6 text-center text-[14px] text-muted">
+                      {unsorted.length
+                        ? "Les favoris non classés n'ont pas de genre assez fréquent pour proposer une playlist : piochez dans les ambiances ci-dessous."
+                        : "Aucun favori en attente : à la dernière synchro, chacun a trouvé sa playlist."}
+                    </p>
+                  )}
+                  <Card component="section" aria-labelledby="moods-title" className="flex min-w-0 flex-col gap-3.5 p-4 sm:p-[22px]">
+                    <div className="flex flex-col gap-1">
+                      <SectionTitle id="moods-title">Playlists d&apos;ambiance</SectionTitle>
+                      <p className="m-0 max-w-[68ch] text-[13.5px] text-muted">
+                        Des playlists prêtes à l&apos;emploi, avec leurs tags. « Créer » l&apos;ajoute sur Tidal (ou complète celle du même nom) ; le chevron
+                        montre ses tags, des exemples, et permet de mettre ses tags dans une playlist existante.
+                      </p>
                     </div>
-                  </details>
-                )}
-              </Card>
-            );
-          })}
-        </div>
-
-        {orphans.length > 0 && (
-          <Alert severity="warning">
-            <span className="mr-2">Mappings vers des playlists introuvables (supprimées ?) :</span>
-            {orphans.map((m) => (
-              <form key={m.id} action={deleteMapping.bind(null, m.id)} className="m-0.5 inline-flex">
-                <span className="inline-flex h-8 items-center gap-0.5 rounded-full bg-tag pl-3 pr-1 text-[13px] text-soft">
-                  {m.genre} → {m.playlistName}
-                  <button
-                    type="submit"
-                    aria-label={`Supprimer le mapping ${m.genre}`}
-                    className="inline-flex size-[26px] cursor-pointer items-center justify-center rounded-full border-0 bg-transparent text-muted hover:text-ink"
-                  >
-                    <Icon name="x" size={12} strokeWidth={2.4} />
-                  </button>
-                </span>
-              </form>
-            ))}
-          </Alert>
-        )}
+                    <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
+                      {catalog.map(({ m, i, count }) => {
+                        const name = moodName(i);
+                        const exists = playlistNames.has(name.toLowerCase());
+                        return (
+                          <li key={m.name}>
+                            <ExpandRow
+                              label={name}
+                              className="rounded-[14px] bg-raised p-2.5"
+                              head={
+                                <>
+                                  <Cover name={name} sub={moodSub(m, name)} size={48} className="max-sm:hidden" />
+                                  <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                                    <RenameForm
+                                      name={name}
+                                      action={renameIdea.bind(null, `mood:${i}`)}
+                                      label={`Renommer l'idée ${name}`}
+                                      hint={IDEA_HINT}
+                                      className="line-clamp-2 break-words text-[15px] font-semibold leading-snug"
+                                    />
+                                    <span className="text-[12.5px]">
+                                      {count > 0 ? (
+                                        <span className="font-semibold text-amber">{plural(count, "favori")} à ranger</span>
+                                      ) : exists ? (
+                                        <span className="text-[#6ee7a0]">Playlist existante</span>
+                                      ) : (
+                                        <span className="text-faint">Rien à ranger pour l&apos;instant</span>
+                                      )}
+                                    </span>
+                                  </div>
+                                </>
+                              }
+                              actions={
+                                <form action={applyMood.bind(null, i)} aria-label={`${exists ? "Compléter" : "Créer"} ${name}`}>
+                                  <Button
+                                    type="submit"
+                                    size="small"
+                                    variant={exists ? "outlined" : "contained"}
+                                    color={exists ? "inherit" : "primary"}
+                                    sx={{ boxShadow: "none", minHeight: 38, paddingInline: "14px" }}
+                                  >
+                                    {exists ? "Compléter" : "Créer"}
+                                  </Button>
+                                </form>
+                              }
+                              body={
+                                <div className="flex flex-col gap-2.5 border-t border-edge px-1 pt-3">
+                                  <p className="m-0 text-[13px] leading-relaxed text-muted">
+                                    <span className="mr-1.5 inline-flex h-5 items-center rounded-md border border-line bg-hollow px-1.5 font-mono text-[11px] text-dim">
+                                      prio {m.priority}
+                                    </span>
+                                    {moodTags(m)
+                                      .map(([t]) => t)
+                                      .join(", ")}
+                                  </p>
+                                  <div className="flex flex-wrap items-center justify-between gap-2.5">
+                                    <Examples tags={moodTags(m).map(([t]) => t)} />
+                                    <AddToPlaylist
+                                      action={applyIdeaTo.bind(null, `mood:${i}`)}
+                                      playlists={targets}
+                                      label={`Ajouter « ${name} » à une playlist existante`}
+                                      selectClassName="max-w-[240px]"
+                                    />
+                                  </div>
+                                </div>
+                              }
+                            />
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </Card>
+                </div>
+              ),
+            },
+            {
+              key: "genres",
+              title: (
+                <>
+                  Genres
+                  <Count n={unmapped.length} tone="amber" />
+                </>
+              ),
+              content: (
+                <div className="flex flex-wrap items-start gap-4">
+                  <Card component="section" aria-labelledby="unmapped-title" className="flex min-w-0 flex-[3_1_480px] flex-col gap-3.5 p-4 sm:p-[22px]">
+                    <div className="flex flex-col gap-1">
+                      <SectionTitle id="unmapped-title">Genres détectés non mappés</SectionTitle>
+                      <p className="m-0 max-w-[68ch] text-[13.5px] text-muted">
+                        Rencontrés pendant les synchros, avec le nombre de favoris en attente. Touchez un genre pour écouter des exemples, l&apos;associer à
+                        une playlist ou l&apos;ignorer.
+                      </p>
+                    </div>
+                    {unmapped.length ? (
+                      <div className="flex flex-wrap gap-2">
+                        {unmapped.map((g) => (
+                          <GenreTag key={g.name} genre={g.name} count={g.count} size="md" />
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="m-0 text-[13.5px] text-faint">Tous les genres rencontrés sont mappés ou ignorés.</p>
+                    )}
+                  </Card>
+                  <Card component="section" aria-labelledby="ignored-title" className="flex min-w-0 flex-[2_1_340px] flex-col gap-3.5 p-4 sm:p-[22px]">
+                    <div className="flex flex-col gap-1">
+                      <SectionTitle id="ignored-title">Genres ignorés</SectionTitle>
+                      <p className="m-0 text-[13.5px] text-muted">
+                        Jamais utilisés pour classer un titre. Une source Tidal/Deezer avec plus de 4 genres est traitée comme une compilation : on passe
+                        au repli suivant.
+                      </p>
+                    </div>
+                    <IgnoredGenres action={saveIgnoredGenres} initial={ignoredList} />
+                  </Card>
+                </div>
+              ),
+            },
+          ]}
+        />
       </main>
     </GenreProvider>
+  );
+}
+
+// Carte d'une playlist : en-tête, genres (les premiers, le reste se déplie), puis actions repliées.
+type MappingRow = { id: number; genre: string; priority: number };
+function PlaylistCard({ playlist: p, own, tracks, options }: { playlist: Playlist; own: MappingRow[]; tracks: ClassifiedTrack[]; options: string[] }) {
+  const sub = coverSub(own);
+  const chip = (m: MappingRow) => (
+    <MappingChip key={m.id} genre={m.genre} priority={m.priority} setPriority={setMappingPriority.bind(null, m.id)} remove={deleteMapping.bind(null, m.id)} />
+  );
+  // Repli seulement s'il cache au moins 3 genres : « Voir 1 autre genre » ne ferait que rajouter un clic.
+  const shown = own.length > VISIBLE_GENRES + 2 ? VISIBLE_GENRES : own.length;
+  const hidden = own.slice(shown);
+  return (
+    <Card component="article" className="flex flex-col gap-3.5 p-4 sm:p-[18px]">
+      <div className="flex items-center gap-3.5">
+        {own.length ? <Cover name={p.name} sub={sub} size={64} /> : <PlainCover size={64} />}
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <RenameForm
+            as="h3"
+            name={p.name}
+            action={renamePlaylist.bind(null, p.id)}
+            label={`Renommer ${p.name}`}
+            hint="renommée aussi sur Tidal ; genres mappés et titres classés restent attachés"
+            className="break-words font-display text-[19px] font-semibold leading-[1.15] tracking-tight"
+          />
+          <span className="text-[13px] text-muted">
+            {plural(p.tracks, "titre")}, {own.length ? plural(own.length, "genre") : "aucun genre"}
+          </span>
+        </div>
+        {own.length > 0 && (
+          <a
+            href={`${coverSrc(p.name, sub)}&download=1`}
+            download
+            title="Télécharger la pochette (Tidal ne permet pas aux applis tierces de l'envoyer : ajoutez-la depuis l'appli Tidal)"
+            className="inline-flex size-10 flex-none items-center justify-center self-start rounded-full text-muted no-underline hover:bg-tag hover:text-ink"
+          >
+            <Icon name="download" size={17} strokeWidth={2} />
+            <span className="sr-only">Télécharger la pochette</span>
+          </a>
+        )}
+      </div>
+
+      {own.length ? (
+        <div className="flex flex-col gap-1.5">
+          <ul aria-label="Genres mappés" className="m-0 flex list-none flex-wrap gap-1.5 p-0">
+            {own.slice(0, shown).map(chip)}
+          </ul>
+          {hidden.length > 0 && (
+            <details className="group">
+              <summary className="inline-flex min-h-8 cursor-pointer list-none items-center gap-1 rounded-full px-1 text-[12.5px] font-semibold text-muted hover:text-ink [&::-webkit-details-marker]:hidden">
+                <span className="group-open:hidden">Voir {plural(hidden.length, "autre genre", "autres genres")}</span>
+                <span className="hidden group-open:inline">Masquer {plural(hidden.length, "genre")}</span>
+              </summary>
+              <ul aria-label="Autres genres mappés" className="m-0 mt-1 flex list-none flex-wrap gap-1.5 p-0">
+                {hidden.map(chip)}
+              </ul>
+            </details>
+          )}
+        </div>
+      ) : (
+        <p className="m-0 rounded-xl border border-dashed border-[#2f3540] p-3 text-center text-[13.5px] text-muted">
+          Aucun genre associé : rien ne sera classé ici.
+        </p>
+      )}
+
+      <div className="mt-auto">
+        <Panels
+          id={p.id}
+          label={`Actions sur ${p.name}`}
+          panels={[
+            {
+              key: "add",
+              label: "Ajouter des genres",
+              icon: "plus",
+              content: <GenrePicker action={addMapping.bind(null, p.id, p.name)} options={options} label={`Ajouter des genres à ${p.name}`} />,
+            },
+            ...(tracks.length
+              ? [
+                  {
+                    key: "tracks",
+                    label: "Titres classés",
+                    icon: "note" as const,
+                    count: tracks.length,
+                    content: <TrackList tracks={tracks} compact label={`Titres classés dans ${p.name}`} />,
+                  },
+                ]
+              : []),
+          ]}
+        />
+      </div>
+    </Card>
   );
 }
 
@@ -395,39 +517,45 @@ function Suggestions({ top, rest, unsortedCount, targets }: { top: Suggestion[];
   return (
     <section
       aria-labelledby="ideas-title"
-      className="flex flex-col gap-[18px] rounded-3xl border border-[#232831] p-[clamp(20px,2.4vw,28px)]"
-      style={{ background: "radial-gradient(620px 280px at 0% 0%, rgba(166,155,255,0.10), transparent 70%), radial-gradient(520px 260px at 100% 100%, rgba(46,230,214,0.07), transparent 70%), #13161b" }}
+      className="flex flex-col gap-4 rounded-3xl border border-[#232831] p-[clamp(16px,2.4vw,26px)]"
+      style={{ background: "radial-gradient(620px 280px at 0% 0%, rgba(166,155,255,0.10), transparent 70%), #13161b" }}
     >
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="flex min-w-0 flex-[1_1_420px] flex-col gap-1.5">
-          <span className="inline-flex items-center gap-2 text-[11.5px] font-semibold uppercase tracking-[0.12em] text-lilac-soft">
+        <div className="flex min-w-0 flex-[1_1_380px] flex-col gap-1.5">
+          <span className="inline-flex items-center gap-2 text-[13px] font-semibold text-lilac-soft">
             <Icon name="sparkles" size={15} />
             Idées de playlists
           </span>
-          <h2 id="ideas-title" className="m-0 font-display text-[clamp(22px,2.2vw,28px)] font-bold leading-[1.15] tracking-[-0.02em]">
+          <h2 id="ideas-title" className="m-0 font-display text-[clamp(21px,2.2vw,27px)] font-bold leading-[1.15] tracking-[-0.02em]">
             {plural(unsortedCount, "favori")} attendent une playlist
           </h2>
-          <p className="m-0 text-[14px] text-dim">
-            D&apos;après les genres de vos favoris non classés. Un clic crée la playlist sur Tidal (ou complète celle du même nom) et y mappe les tags ;
-            « Ajouter à… » les met dans une playlist existante. Les titres sont rangés à la prochaine synchro.
+          <p className="m-0 max-w-[62ch] text-[14px] text-dim">
+            Un clic crée la playlist sur Tidal avec ses genres ; vos favoris y sont rangés à la prochaine synchro.
           </p>
         </div>
-        <form action={applySuggestions}>
+        <form action={applySuggestions} className="max-sm:w-full">
           {top.map((s) => (
             <input key={s.key} type="hidden" name="key" value={s.key} />
           ))}
-          <Button type="submit" variant="contained" color="secondary" startIcon={<Icon name="sparkles" />} sx={{ boxShadow: "0 10px 30px -12px rgba(166,155,255,0.7)" }}>
+          <Button
+            type="submit"
+            variant="contained"
+            color="secondary"
+            fullWidth
+            startIcon={<Icon name="sparkles" />}
+            sx={{ boxShadow: "0 10px 30px -12px rgba(166,155,255,0.7)" }}
+          >
             Tout créer ({top.length})
           </Button>
         </form>
       </div>
 
-      <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(min(300px,100%),1fr))] gap-3 p-0">
+      <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(min(280px,100%),1fr))] gap-3 p-0">
         {top.map((s) => (
           <li key={s.key}>
             <div className="flex h-full flex-col gap-3 rounded-[18px] border border-edge bg-stage p-4">
               <div className="flex items-center gap-3">
-                <Cover name={s.name} sub={s.coverSub} size={56} />
+                <Cover name={s.name} sub={s.coverSub} size={52} />
                 <div className="flex min-w-0 flex-col gap-0.5">
                   <RenameForm
                     name={s.name}
@@ -438,36 +566,44 @@ function Suggestions({ top, rest, unsortedCount, targets }: { top: Suggestion[];
                   />
                   <span className="text-[13px]">
                     <strong className="font-semibold text-amber">{plural(s.count, "favori")}</strong>
-                    <span className="text-muted"> à ranger{s.exists && " · existe déjà"}</span>
+                    <span className="text-muted"> à ranger{s.exists && ", playlist existante"}</span>
                   </span>
                 </div>
               </div>
               <div className="flex flex-wrap gap-1">
-                {s.tags.slice(0, 5).map((t) => (
+                {s.tags.slice(0, 3).map((t) => (
                   <GenreTag key={t} genre={t} />
                 ))}
-                {s.tags.length > 5 && <span className="text-xs leading-6 text-faint">+{s.tags.length - 5}</span>}
+                {s.tags.length > 3 && <span className="text-xs leading-6 text-faint">+{s.tags.length - 3}</span>}
               </div>
-              <ul className="m-0 flex list-none flex-col gap-0.5 p-0 text-[12.5px] text-muted">
-                {s.examples.map((e) => (
-                  <li key={e} className="truncate">
-                    {e}
-                  </li>
-                ))}
-              </ul>
-              <Examples tags={s.tags} />
               <div className="mt-auto flex flex-col gap-2">
                 <form action={applySuggestion.bind(null, s.key)} className="flex">
                   <Button type="submit" size="small" fullWidth variant={s.exists ? "outlined" : "contained"} color={s.exists ? "inherit" : "primary"} sx={{ boxShadow: "none" }}>
                     {s.exists ? "Compléter" : "Créer"} « {s.name} »
                   </Button>
                 </form>
-                <AddToPlaylist
-                  action={applyIdeaTo.bind(null, s.key)}
-                  playlists={targets}
-                  label={`Ajouter « ${s.name} » à une playlist existante`}
-                  selectClassName="w-full max-w-none"
-                />
+                <details className="group">
+                  <summary className="flex min-h-9 cursor-pointer list-none items-center justify-center gap-1.5 text-[12.5px] font-semibold text-muted hover:text-ink [&::-webkit-details-marker]:hidden">
+                    <span className="group-open:hidden">Titres, exemples, autres options</span>
+                    <span className="hidden group-open:inline">Masquer</span>
+                  </summary>
+                  <div className="flex flex-col gap-2.5 border-t border-edge pt-2.5">
+                    <ul aria-label="Favoris concernés" className="m-0 flex list-none flex-col gap-0.5 p-0 text-[12.5px] text-muted">
+                      {s.examples.map((e) => (
+                        <li key={e} className="truncate">
+                          {e}
+                        </li>
+                      ))}
+                    </ul>
+                    <Examples tags={s.tags} />
+                    <AddToPlaylist
+                      action={applyIdeaTo.bind(null, s.key)}
+                      playlists={targets}
+                      label={`Ajouter « ${s.name} » à une playlist existante`}
+                      selectClassName="w-full max-w-none"
+                    />
+                  </div>
+                </details>
               </div>
             </div>
           </li>
@@ -475,28 +611,43 @@ function Suggestions({ top, rest, unsortedCount, targets }: { top: Suggestion[];
       </ul>
 
       {rest.length > 0 && (
-        <details className="group rounded-[14px] border border-edge bg-stage/60 px-4 py-3">
-          <summary className="cursor-pointer list-none text-[13.5px] font-semibold text-soft">
+        <details className="group rounded-[14px] border border-edge bg-stage/60 px-3 py-2.5 sm:px-4">
+          <summary className="flex min-h-9 cursor-pointer list-none items-center text-[13.5px] font-semibold text-soft [&::-webkit-details-marker]:hidden">
             <span className="group-open:hidden">Voir {plural(rest.length, "autre idée", "autres idées")}</span>
             <span className="hidden group-open:inline">Masquer les autres idées</span>
           </summary>
-          <ul className="m-0 mt-3 flex list-none flex-col gap-1 p-0">
+          <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0">
             {rest.map((s) => (
               <li key={s.key}>
-                <div className="flex items-center gap-3 rounded-xl p-1.5 hover:bg-raised">
-                  <Cover name={s.name} sub={s.coverSub} size={36} />
-                  <span className="flex min-w-0 flex-1 items-center gap-1 text-sm font-medium">
-                    <RenameForm name={s.name} action={renameIdea.bind(null, s.key)} label={`Renommer l'idée ${s.name}`} hint={IDEA_HINT} className="truncate" />
-                    <Mono className="flex-none text-xs text-faint">· {s.count}</Mono>
-                  </span>
-                  <span className="hidden min-w-0 flex-1 truncate text-xs text-muted sm:block">{s.tags.slice(0, 4).join(", ")}</span>
-                  <form action={applySuggestion.bind(null, s.key)} aria-label={`${s.exists ? "Compléter" : "Créer"} ${s.name}`}>
-                    <Button type="submit" size="small" variant="outlined" color="inherit">
-                      {s.exists ? "Compléter" : "Créer"}
-                    </Button>
-                  </form>
-                  <AddToPlaylist action={applyIdeaTo.bind(null, s.key)} playlists={targets} label={`Ajouter « ${s.name} » à une playlist existante`} className="max-sm:hidden" />
-                </div>
+                <ExpandRow
+                  label={s.name}
+                  className="rounded-xl p-1.5 hover:bg-raised"
+                  head={
+                    <>
+                      <Cover name={s.name} sub={s.coverSub} size={36} />
+                      <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm font-medium">
+                        <RenameForm name={s.name} action={renameIdea.bind(null, s.key)} label={`Renommer l'idée ${s.name}`} hint={IDEA_HINT} className="line-clamp-2 break-words leading-snug" />
+                        <Mono className="flex-none text-xs text-amber">{s.count}</Mono>
+                      </span>
+                    </>
+                  }
+                  actions={
+                    <form action={applySuggestion.bind(null, s.key)} aria-label={`${s.exists ? "Compléter" : "Créer"} ${s.name}`}>
+                      <Button type="submit" size="small" variant="outlined" color="inherit" sx={{ minHeight: 36, paddingInline: "12px" }}>
+                        {s.exists ? "Compléter" : "Créer"}
+                      </Button>
+                    </form>
+                  }
+                  body={
+                    <div className="flex flex-col gap-2.5 px-1">
+                      <span className="text-xs text-muted">{s.tags.join(", ")}</span>
+                      <div className="flex flex-wrap items-center justify-between gap-2.5">
+                        <Examples tags={s.tags} />
+                        <AddToPlaylist action={applyIdeaTo.bind(null, s.key)} playlists={targets} label={`Ajouter « ${s.name} » à une playlist existante`} selectClassName="max-w-[240px]" />
+                      </div>
+                    </div>
+                  }
+                />
               </li>
             ))}
           </ul>
