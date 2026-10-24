@@ -41,10 +41,10 @@ function CoverTile({ running }: { running: boolean }) {
   return (
     <div
       aria-hidden="true"
-      className="box-border flex size-[136px] flex-none items-center justify-center rounded-[18px] max-sm:size-24"
+      className="box-border flex size-[136px] flex-none items-center justify-center rounded-[18px] max-sm:hidden"
       style={{ background: "linear-gradient(140deg, #2ee6d6 0%, #5f86ff 58%, #a69bff 100%)", boxShadow: "0 22px 44px -22px rgba(46,230,214,0.6)" }}
     >
-      <Logo variant="ink" size={112} className={`max-sm:size-20 ${running ? "tp-spin" : ""}`} />
+      <Logo variant="ink" size={112} className={running ? "tp-spin" : ""} />
     </div>
   );
 }
@@ -66,7 +66,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const wave = waveColors(running, lastRun?.moved ?? 0, lastRun?.skipped ?? 0, lastRun?.failed ?? 0);
 
   return (
-    <main className="mx-auto flex max-w-[1280px] flex-col gap-4 px-[clamp(16px,3vw,32px)] pb-16 pt-7">
+    <main className="mx-auto flex max-w-[1280px] flex-col gap-4 px-[clamp(14px,3vw,32px)] pb-12 pt-6">
       <AutoRefresh active={running} />
       {tidal && <Alert severity={tidal === "ok" ? "success" : "error"}>{tidal === "ok" ? "Compte Tidal connecté." : tidal}</Alert>}
       {error && <Alert severity="error">{error}</Alert>}
@@ -74,7 +74,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       {token ? (
         <section
           aria-labelledby="sync-title"
-          className="relative flex flex-wrap items-center gap-7 overflow-hidden rounded-3xl border border-[#232831] p-[clamp(20px,2.4vw,32px)]"
+          className="relative flex flex-wrap items-center gap-7 overflow-hidden rounded-3xl border border-[#232831] p-[clamp(18px,2.4vw,32px)] max-sm:gap-5"
           style={{
             background:
               "radial-gradient(620px 280px at 0% 0%, rgba(46,230,214,0.10), transparent 70%), radial-gradient(520px 260px at 100% 100%, rgba(166,155,255,0.08), transparent 70%), #13161b",
@@ -225,7 +225,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         </StatCard>
 
         <StatCard title="Titres triés" icon="sort">
-          <span className="font-display text-[44px] font-bold leading-none tracking-[-0.03em]">{int(totals._sum.moved ?? 0)}</span>
+          <span className="font-display text-[44px] font-bold leading-none tracking-[-0.03em] max-sm:text-[34px]">{int(totals._sum.moved ?? 0)}</span>
           <span className="mt-auto text-[13px] text-muted">
             {totals._count ? `${totals._count} synchro${totals._count > 1 ? "s" : ""} réelle${totals._count > 1 ? "s" : ""}` : "Aucune synchro réelle"} ·{" "}
             {mappingCount ? `${mappingCount} genre${mappingCount > 1 ? "s" : ""} mappé${mappingCount > 1 ? "s" : ""}` : "aucun genre mappé"}
@@ -234,7 +234,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       </div>
 
       <div className="flex flex-wrap items-start gap-4">
-        <Card component="section" aria-labelledby="logs-title" className="flex min-w-0 flex-[999_1_620px] flex-col gap-4 p-[22px]">
+        <Card component="section" aria-labelledby="logs-title" className="flex min-w-0 flex-[999_1_620px] flex-col gap-4 p-[22px] max-sm:p-4">
           <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1.5">
             <SectionTitle id="logs-title">Logs</SectionTitle>
             {lastRun && (
@@ -283,7 +283,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           </GenreProvider>
         </Card>
 
-        <Card component="section" aria-labelledby="plan-title" className="flex min-w-0 flex-[1_1_360px] flex-col gap-[22px] p-[22px]">
+        <Card component="section" aria-labelledby="plan-title" className="flex min-w-0 flex-[1_1_360px] flex-col gap-[22px] p-[22px] max-sm:p-4">
           <SectionTitle id="plan-title">Planification et comportement</SectionTitle>
           <SettingsForm action={saveSettings} settings={settings} />
         </Card>
@@ -326,7 +326,7 @@ const Legend = ({ color, n, label }: { color: string; n: number; label: string }
 
 function StatCard({ title, icon, children }: { title: string; icon: "note" | "clock" | "sort"; children: React.ReactNode }) {
   return (
-    <Card component="article" className="box-border flex min-h-40 flex-col gap-2.5 p-[22px]">
+    <Card component="article" className="box-border flex flex-col gap-2.5 p-[22px] max-sm:gap-1.5 max-sm:p-4 sm:min-h-40">
       <div className="flex items-center justify-between gap-2">
         <Overline as="h2">{title}</Overline>
         <Icon name={icon} className="text-faint" />

@@ -117,7 +117,7 @@ export default function LogViewer({ logs }: { logs: LogLine[] }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2.5">
-        <div role="group" aria-label="Filtrer par niveau" className="flex flex-wrap gap-1.5">
+        <div role="group" aria-label="Filtrer par niveau" className="tp-noscrollbar flex max-w-full gap-1.5 overflow-x-auto sm:flex-wrap">
           {FILTERS.map((f) => {
             const on = f.key === level;
             return (
@@ -126,7 +126,7 @@ export default function LogViewer({ logs }: { logs: LogLine[] }) {
                 type="button"
                 aria-pressed={on}
                 onClick={() => setLevel(f.key)}
-                className={`inline-flex h-10 cursor-pointer items-center gap-2 rounded-full border px-3.5 text-[13px] font-semibold ${
+                className={`inline-flex h-10 flex-none cursor-pointer items-center gap-2 rounded-full border px-3.5 text-[13px] font-semibold ${
                   on ? "border-ink bg-ink text-night" : "border-line bg-[#181b21] text-soft hover:border-[#3a414c]"
                 }`}
               >
